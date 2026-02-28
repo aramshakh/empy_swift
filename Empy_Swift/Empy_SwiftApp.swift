@@ -9,6 +9,11 @@ import SwiftUI
 
 @main
 struct Empy_SwiftApp: App {
+    init() {
+        // Log configuration status on startup
+        AppConfig.logStartupConfig()
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
