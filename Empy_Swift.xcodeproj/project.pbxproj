@@ -10,22 +10,9 @@
 		08BA5D612F51D1A400B5DF84 /* Empy_Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Empy_Swift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		08BA5D702F51D5CB00B5DF84 /* Exceptions for "Empy_Swift" folder in "Empy_Swift" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"Empy-Swift-Info.plist",
-			);
-			target = 08BA5D602F51D1A400B5DF84 /* Empy_Swift */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		08BA5D632F51D1A400B5DF84 /* Empy_Swift */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				08BA5D702F51D5CB00B5DF84 /* Exceptions for "Empy_Swift" folder in "Empy_Swift" target */,
-			);
 			path = Empy_Swift;
 			sourceTree = "<group>";
 		};
