@@ -21,21 +21,28 @@ jobs:
     - name: Show Xcode version
       run: xcodebuild -version
       
+    - name: List available schemes
+      run: xcodebuild -list -project Empy_Swift.xcodeproj
+      
     - name: Build
       run: |
         xcodebuild clean build \
+          -project Empy_Swift.xcodeproj \
           -scheme Empy_Swift \
           -destination 'platform=macOS' \
           CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGNING_REQUIRED=NO \
+          -quiet
       
     - name: Run Tests
       run: |
         xcodebuild test \
+          -project Empy_Swift.xcodeproj \
           -scheme Empy_Swift \
           -destination 'platform=macOS' \
           CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGNING_REQUIRED=NO \
+          -quiet
       
     - name: SwiftLint
       run: |
