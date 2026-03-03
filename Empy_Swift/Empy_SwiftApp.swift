@@ -9,6 +9,8 @@ import SwiftUI
 
 @main
 struct Empy_SwiftApp: App {
+    @StateObject private var coordinator = NavigationCoordinator()
+    
     init() {
         // Log configuration status on startup
         AppConfig.logStartupConfig()
@@ -16,7 +18,20 @@ struct Empy_SwiftApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            NavigationStack(path: $coordinator.path) {
+                SetupView()
+                    .navigationDestination(for: AppScreen.self) { screen in
+                        switch screen {
+                        case .setup:
+                            SetupView()
+                        case .recording:
+                            RecordingView()
+                        case .results(let transcript):
+                            ResultsView(transcript: transcript)
+                        }
+                    }
+            }
+            .environmentObject(coordinator)
         }
     }
 }
