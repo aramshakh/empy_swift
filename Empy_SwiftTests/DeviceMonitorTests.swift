@@ -2,8 +2,8 @@
 //  DeviceMonitorTests.swift
 //  Empy_SwiftTests
 //
-//  Created by Orchestrator on 2026-03-03.
-//  Tests for DeviceMonitor audio route change handling
+//  Refactored: 2026-03-03 (macOS APIs only)
+//  Tests for DeviceMonitor audio configuration change handling
 //
 
 import XCTest
@@ -14,6 +14,7 @@ class DeviceMonitorTests: XCTestCase {
     var monitor: DeviceMonitor!
     var mockDelegate: MockDeviceMonitorDelegate!
     var mockLogger: MockSessionLogger!
+    var mockEngine: AVAudioEngine!
     
     override func setUp() {
         super.setUp()
@@ -21,6 +22,7 @@ class DeviceMonitorTests: XCTestCase {
         monitor = DeviceMonitor(logger: mockLogger)
         mockDelegate = MockDeviceMonitorDelegate()
         monitor.delegate = mockDelegate
+        mockEngine = AVAudioEngine()
     }
     
     override func tearDown() {
@@ -28,6 +30,7 @@ class DeviceMonitorTests: XCTestCase {
         monitor = nil
         mockDelegate = nil
         mockLogger = nil
+        mockEngine = nil
         super.tearDown()
     }
     
@@ -35,42 +38,39 @@ class DeviceMonitorTests: XCTestCase {
     
     func testMonitoringStartsSuccessfully() {
         // When
-        monitor.startMonitoring()
+        monitor.startMonitoring(engine: mockEngine)
         
         // Then
         XCTAssertEqual(mockLogger.loggedEvents.count, 1)
-        XCTAssertEqual(mockLogger.loggedEvents.first?.event, "device_monitor_started")
+        XCTAssertEqual(mockLogger.loggedEvents.first?.event, "device_monitoring_started")
         XCTAssertEqual(mockLogger.loggedEvents.first?.layer, "audio")
     }
     
     func testStopMonitoringUnsubscribes() {
         // Given
-        monitor.startMonitoring()
+        monitor.startMonitoring(engine: mockEngine)
         
         // When
         monitor.stopMonitoring()
         
         // Then
         XCTAssertEqual(mockLogger.loggedEvents.count, 2)
-        XCTAssertEqual(mockLogger.loggedEvents.last?.event, "device_monitor_stopped")
+        XCTAssertEqual(mockLogger.loggedEvents.last?.event, "device_monitoring_stopped")
     }
     
-    func testRouteChangeNotificationTriggersDelegate() {
+    func testConfigurationChangeTriggersDelegate() {
         // Given
-        monitor.startMonitoring()
+        monitor.startMonitoring(engine: mockEngine)
         let expectation = XCTestExpectation(description: "Delegate called")
-        mockDelegate.onDisconnect = { reason in
-            XCTAssertEqual(reason, .oldDeviceUnavailable)
+        mockDelegate.onDisconnect = { deviceName in
+            XCTAssertFalse(deviceName.isEmpty)
             expectation.fulfill()
         }
         
-        // When
+        // When: Simulate configuration change notification
         NotificationCenter.default.post(
-            name: AVAudioSession.routeChangeNotification,
-            object: nil,
-            userInfo: [
-                AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-            ]
+            name: .AVAudioEngineConfigurationChange,
+            object: mockEngine
         )
         
         // Then
@@ -78,47 +78,70 @@ class DeviceMonitorTests: XCTestCase {
         XCTAssertTrue(mockDelegate.disconnectCalled)
     }
     
-    func testCategoryChangeTriggersDelegate() {
+    func testConfigurationChangeLogsEvent() {
         // Given
-        monitor.startMonitoring()
-        let expectation = XCTestExpectation(description: "Delegate called for category change")
-        mockDelegate.onDisconnect = { reason in
-            XCTAssertEqual(reason, .categoryChange)
-            expectation.fulfill()
-        }
+        monitor.startMonitoring(engine: mockEngine)
         
-        // When
+        // When: Simulate configuration change
         NotificationCenter.default.post(
-            name: AVAudioSession.routeChangeNotification,
-            object: nil,
-            userInfo: [
-                AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.categoryChange.rawValue
-            ]
+            name: .AVAudioEngineConfigurationChange,
+            object: mockEngine
         )
         
         // Then
-        wait(for: [expectation], timeout: 1.0)
-        XCTAssertTrue(mockDelegate.disconnectCalled)
+        // Give notification time to process
+        Thread.sleep(forTimeInterval: 0.1)
+        
+        let configChangeLogs = mockLogger.loggedEvents.filter { $0.event == "device_config_changed" }
+        XCTAssertGreaterThan(configChangeLogs.count, 0, "Configuration change should be logged")
+        
+        if let log = configChangeLogs.first {
+            XCTAssertEqual(log.layer, "audio")
+            XCTAssertNotNil(log.details?["device"])
+            XCTAssertNotNil(log.details?["is_running"])
+        }
     }
     
-    func testNewDeviceAvailableDoesNotTriggerDelegate() {
+    func testMultipleConfigurationChanges() {
         // Given
-        monitor.startMonitoring()
+        monitor.startMonitoring(engine: mockEngine)
+        let expectation = XCTestExpectation(description: "Multiple changes handled")
+        expectation.expectedFulfillmentCount = 3
+        
         mockDelegate.onDisconnect = { _ in
-            XCTFail("Delegate should not be called for new device available")
+            expectation.fulfill()
         }
         
-        // When
+        // When: Simulate multiple configuration changes
+        for _ in 0..<3 {
+            NotificationCenter.default.post(
+                name: .AVAudioEngineConfigurationChange,
+                object: mockEngine
+            )
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        
+        // Then
+        wait(for: [expectation], timeout: 2.0)
+        XCTAssertEqual(mockDelegate.disconnectCallCount, 3)
+    }
+    
+    func testConfigurationChangeFromDifferentEngineIgnored() {
+        // Given
+        monitor.startMonitoring(engine: mockEngine)
+        let otherEngine = AVAudioEngine()
+        
+        mockDelegate.onDisconnect = { _ in
+            XCTFail("Delegate should not be called for different engine")
+        }
+        
+        // When: Simulate configuration change from different engine
         NotificationCenter.default.post(
-            name: AVAudioSession.routeChangeNotification,
-            object: nil,
-            userInfo: [
-                AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.newDeviceAvailable.rawValue
-            ]
+            name: .AVAudioEngineConfigurationChange,
+            object: otherEngine
         )
         
         // Then
-        // Wait a bit to ensure delegate is not called
         let expectation = XCTestExpectation(description: "Wait for potential callback")
         expectation.isInverted = true
         wait(for: [expectation], timeout: 0.5)
@@ -126,41 +149,40 @@ class DeviceMonitorTests: XCTestCase {
         XCTAssertFalse(mockDelegate.disconnectCalled)
     }
     
-    func testRouteChangeLogsEvent() {
+    func testMonitoringAfterStopDoesNotTrigger() {
         // Given
-        monitor.startMonitoring()
+        monitor.startMonitoring(engine: mockEngine)
+        monitor.stopMonitoring()
         
-        // When
+        mockDelegate.onDisconnect = { _ in
+            XCTFail("Delegate should not be called after stop")
+        }
+        
+        // When: Simulate configuration change after stop
         NotificationCenter.default.post(
-            name: AVAudioSession.routeChangeNotification,
-            object: nil,
-            userInfo: [
-                AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-            ]
+            name: .AVAudioEngineConfigurationChange,
+            object: mockEngine
         )
         
         // Then
-        // Give notification time to process
-        Thread.sleep(forTimeInterval: 0.1)
+        let expectation = XCTestExpectation(description: "Wait for potential callback")
+        expectation.isInverted = true
+        wait(for: [expectation], timeout: 0.5)
         
-        let routeChangeLogs = mockLogger.loggedEvents.filter { $0.event == "audio_route_changed" }
-        XCTAssertGreaterThan(routeChangeLogs.count, 0, "Route change should be logged")
-        
-        if let log = routeChangeLogs.first {
-            XCTAssertEqual(log.layer, "audio")
-            XCTAssertNotNil(log.details?["reason"])
-        }
+        XCTAssertFalse(mockDelegate.disconnectCalled)
     }
 }
 
 // MARK: - Mock Delegate
 class MockDeviceMonitorDelegate: DeviceMonitorDelegate {
     var disconnectCalled = false
-    var onDisconnect: ((AVAudioSession.RouteChangeReason) -> Void)?
+    var disconnectCallCount = 0
+    var onDisconnect: ((String) -> Void)?
     
-    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect reason: AVAudioSession.RouteChangeReason) {
+    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect deviceName: String) {
         disconnectCalled = true
-        onDisconnect?(reason)
+        disconnectCallCount += 1
+        onDisconnect?(deviceName)
     }
 }
 
