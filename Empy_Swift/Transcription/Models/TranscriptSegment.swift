@@ -51,7 +51,7 @@ struct TranscriptState {
     
     /// Total word count across all segments
     var wordCount: Int {
-        segments.reduce(0) { $0 + $1.text.split(separator: " ").count }
+        segments.reduce(0) { $0 + $1.text.split(whereSeparator: { $0.isWhitespace }).count }
     }
     
     /// Count of final segments

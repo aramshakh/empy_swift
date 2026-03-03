@@ -118,12 +118,13 @@ extension TranscriptEngine: DeepgramClientDelegate {
         lastPartialID = segment.id
         transcriptState.segments.append(segment)
         
+        let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
         logger.log(
             event: "transcript_partial_received",
             layer: "transcript",
             details: [
                 "length": "\(transcript.count)",
-                "words": "\(transcript.split(separator: \" \").count)"
+                "words": "\(wordCount)"
             ]
         )
     }
@@ -148,12 +149,13 @@ extension TranscriptEngine: DeepgramClientDelegate {
         transcriptState.segments.append(segment)
         lastFinalTimestamp = Date()
         
+        let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
         logger.log(
             event: "transcript_final_received",
             layer: "transcript",
             details: [
                 "text": String(transcript.prefix(50)),
-                "word_count": "\(transcript.split(separator: \" \").count)",
+                "word_count": "\(wordCount)",
                 "total_words": "\(transcriptState.wordCount)"
             ]
         )
