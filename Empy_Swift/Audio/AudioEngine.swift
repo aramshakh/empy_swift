@@ -1,6 +1,10 @@
 import AVFoundation
 import Combine
 
+extension Notification.Name {
+    static let audioEngineFailed = Notification.Name("audioEngineFailed")
+}
+
 /// Audio engine for capturing microphone input and emitting PCM chunks
 class AudioEngine: ObservableObject {
     /// Whether the engine is currently capturing audio
@@ -15,6 +19,12 @@ class AudioEngine: ObservableObject {
     /// Chunk emitter for buffering and emitting audio chunks
     private var chunkEmitter: ChunkEmitter?
     
+    /// Device monitor for handling audio route changes
+    private let deviceMonitor: DeviceMonitor
+    
+    /// Session logger for event tracking
+    private let logger: SessionLogger
+    
     /// Audio format: 16kHz, mono, Int16 PCM
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
@@ -22,6 +32,12 @@ class AudioEngine: ObservableObject {
         channels: 1,
         interleaved: false
     )
+    
+    init(logger: SessionLogger = .shared) {
+        self.logger = logger
+        self.deviceMonitor = DeviceMonitor(logger: logger)
+        deviceMonitor.delegate = self
+    }
     
     /// Start capturing audio from the microphone
     /// - Throws: Audio engine errors or permission errors
@@ -31,10 +47,14 @@ class AudioEngine: ObservableObject {
         try audioSession.setCategory(.record, mode: .measurement)
         try audioSession.setActive(true)
         
+        // Start device monitoring
+        deviceMonitor.startMonitoring()
+        
         // Request permission if not already granted
         audioSession.requestRecordPermission { [weak self] granted in
             guard granted else {
                 print("⚠️ Microphone permission denied")
+                self?.logger.log(event: "mic_permission_denied", layer: "audio")
                 return
             }
             
@@ -43,6 +63,11 @@ class AudioEngine: ObservableObject {
                     try self?.setupEngine()
                 } catch {
                     print("❌ Failed to setup engine: \(error)")
+                    self?.logger.log(
+                        event: "engine_setup_failed",
+                        layer: "audio",
+                        details: ["error": error.localizedDescription]
+                    )
                 }
             }
         }
@@ -144,6 +169,7 @@ class AudioEngine: ObservableObject {
     
     /// Stop capturing audio
     func stop() {
+        deviceMonitor.stopMonitoring()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         chunkEmitter = nil
@@ -152,6 +178,56 @@ class AudioEngine: ObservableObject {
             self.isCapturing = false
         }
         
+        logger.log(event: "engine_stopped", layer: "audio")
         print("🛑 Audio engine stopped")
+    }
+    
+    /// Restart the audio engine (used after device disconnect)
+    private func restartEngine() throws {
+        logger.log(event: "engine_restart_attempt", layer: "audio")
+        
+        // Stop current engine
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        chunkEmitter = nil
+        
+        // Small delay to allow system to settle
+        Thread.sleep(forTimeInterval: 0.1)
+        
+        // Restart with new default device
+        try setupEngine()
+        
+        logger.log(event: "engine_restart_success", layer: "audio")
+    }
+}
+
+// MARK: - DeviceMonitorDelegate
+extension AudioEngine: DeviceMonitorDelegate {
+    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect reason: AVAudioSession.RouteChangeReason) {
+        logger.log(
+            event: "device_disconnect",
+            layer: "audio",
+            details: ["reason": "\(reason.rawValue)"]
+        )
+        
+        // Attempt to restart engine with new default device
+        do {
+            try restartEngine()
+            logger.log(event: "device_failover_success", layer: "audio")
+        } catch {
+            logger.log(
+                event: "device_failover_failed",
+                layer: "audio",
+                details: ["error": error.localizedDescription]
+            )
+            
+            // Notify SessionManager about failure
+            NotificationCenter.default.post(name: .audioEngineFailed, object: nil)
+            
+            // Stop capturing state
+            DispatchQueue.main.async {
+                self.isCapturing = false
+            }
+        }
     }
 }
