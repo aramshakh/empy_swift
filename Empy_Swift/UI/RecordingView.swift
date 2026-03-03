@@ -37,6 +37,11 @@ struct RecordingView: View {
     
     private func sidebarView() -> some View {
         VStack(alignment: .leading, spacing: EmpySpacing.md) {
+            // Session timer at top
+            SessionTimerView()
+            
+            Divider()
+            
             Text("Session Stats")
                 .font(.empyLabel)
                 .foregroundColor(.empySecondaryText)
