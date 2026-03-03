@@ -156,6 +156,48 @@ final class SessionLogger {
         self.sessionStartTime = nil
     }
     
+    // MARK: - Convenience Methods
+    
+    /// Convenience method to log a simple event with optional metadata.
+    ///
+    /// This method automatically constructs a LogEvent with the current session context.
+    ///
+    /// - Parameters:
+    ///   - event: Event type identifier
+    ///   - layer: System layer (audio, transcription, session, ui)
+    ///   - details: Optional metadata dictionary
+    ///   - sourceFile: Source file (automatically filled)
+    func log(
+        event: String,
+        layer: String,
+        details: [String: String]? = nil,
+        sourceFile: String = #file
+    ) {
+        queue.async { [weak self] in
+            guard let self = self,
+                  let sessionId = self.currentSessionId else {
+                print("SessionLogger: No active session, dropping log event")
+                return
+            }
+            
+            let logEvent = LogEvent(
+                sessionId: sessionId,
+                event: event,
+                layer: layer,
+                sourceFile: (sourceFile as NSString).lastPathComponent,
+                seqId: nil,
+                tMonotonic: self.monotonicTime(),
+                tWall: ISO8601DateFormatter().string(from: Date()),
+                bytes: nil,
+                durationMs: nil,
+                state: nil,
+                meta: details
+            )
+            
+            self.log(logEvent)
+        }
+    }
+    
     // MARK: - Helper Methods
     
     /// Calculates monotonic time in milliseconds since session start
