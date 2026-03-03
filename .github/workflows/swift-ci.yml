@@ -1,8 +1,8 @@
 name: Swift CI
 
 on:
-  # pull_request: # Disabled temporarily
-  #   branches: [ main ]
+  pull_request:
+    branches: [ main ]
   push:
     branches: [ main ]
 
