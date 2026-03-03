@@ -87,12 +87,32 @@ struct RecordingView: View {
         transcriptEngine.endSession()
     }
     
+    // MARK: - Talk Ratio Calculation
+    
+    private func calculateTalkRatio() -> Double {
+        let messages = transcriptEngine.transcriptState.segments
+        guard !messages.isEmpty else { return 0.5 }
+        
+        let userWords = messages
+            .filter { $0.speaker == .you }
+            .reduce(0) { $0 + $1.text.split(separator: " ").count }
+        
+        let totalWords = messages
+            .reduce(0) { $0 + $1.text.split(separator: " ").count }
+        
+        guard totalWords > 0 else { return 0.5 }
+        return Double(userWords) / Double(totalWords)
+    }
+    
     // MARK: - Sidebar
     
     private func sidebarView() -> some View {
         VStack(alignment: .leading, spacing: EmpySpacing.md) {
             // Session timer at top
             SessionTimerView()
+            
+            // Talk ratio indicator
+            TalkRatioView(userPercentage: calculateTalkRatio())
             
             Divider()
             
