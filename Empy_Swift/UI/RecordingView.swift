@@ -2,61 +2,105 @@
 //  RecordingView.swift
 //  Empy_Swift
 //
-//  Created by Orchestrator on 2026-03-03.
-//  Recording screen placeholder (T09)
+//  T11: Recording screen layout
 //
 
 import SwiftUI
 
 struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
-    @State private var isRecording = false
+    @State private var isPaused: Bool = false
     
     var body: some View {
-        VStack(spacing: 30) {
-            Text("Recording...")
-                .font(.largeTitle)
-                .fontWeight(.bold)
+        VStack(spacing: 0) {
+            // Main content: Sidebar + Transcript
+            HSplitView {
+                // Left sidebar
+                sidebarView()
+                    .frame(width: 280)
+                
+                // Main transcript area
+                transcriptAreaView()
+            }
             
-            // Visual indicator
-            Circle()
-                .fill(isRecording ? Color.red : Color.gray)
-                .frame(width: 100, height: 100)
-                .overlay(
-                    Circle()
-                        .stroke(isRecording ? Color.red.opacity(0.5) : Color.clear, lineWidth: 4)
-                        .scaleEffect(isRecording ? 1.2 : 1.0)
-                        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isRecording)
-                )
+            // Bottom control bar
+            controlBarView()
+        }
+        .navigationTitle("Recording")
+    }
+    
+    // MARK: - Sidebar
+    
+    private func sidebarView() -> some View {
+        VStack(alignment: .leading, spacing: EmpySpacing.md) {
+            Text("Session Stats")
+                .font(.empyLabel)
+                .foregroundColor(.empySecondaryText)
             
-            Text(isRecording ? "Listening..." : "Paused")
-                .foregroundColor(.secondary)
+            Text("Stats placeholder")
+                .font(.empyCaption)
+            
+            Divider()
+            
+            Text("Coach Cards")
+                .font(.empyLabel)
+                .foregroundColor(.empySecondaryText)
+            
+            Text("Coach cards placeholder")
+                .font(.empyCaption)
             
             Spacer()
-            
-            Button(isRecording ? "Stop Recording" : "Start Recording") {
-                isRecording.toggle()
+        }
+        .padding(EmpySpacing.md)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - Transcript Area
+    
+    private func transcriptAreaView() -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: EmpySpacing.sm) {
+                Text("Transcript will appear here")
+                    .font(.empyBody)
+                    .foregroundColor(.empySecondaryText)
+                    .padding(EmpySpacing.md)
                 
-                if !isRecording {
-                    // Mock transcript for T09 testing
-                    let mockTranscript = """
-                    This is a test transcript generated during T09 navigation testing.
-                    In production, this will be replaced with real Deepgram transcription.
-                    """
-                    coordinator.endRecording(transcript: mockTranscript)
+                Spacer()
+            }
+        }
+    }
+    
+    // MARK: - Control Bar
+    
+    private func controlBarView() -> some View {
+        HStack(spacing: EmpySpacing.md) {
+            Button {
+                coordinator.endRecording(transcript: "Mock transcript from T11")
+            } label: {
+                HStack {
+                    Image(systemName: "stop.fill")
+                    Text("Stop")
                 }
             }
             .buttonStyle(.borderedProminent)
+            .tint(.red)
             .controlSize(.large)
-            .tint(isRecording ? .red : .green)
             
-            Spacer()
+            Button {
+                isPaused.toggle()
+                // TODO: implement pause functionality
+            } label: {
+                HStack {
+                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                    Text(isPaused ? "Resume" : "Pause")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
-        .padding()
-        .navigationTitle("Recording")
-        .onAppear {
-            isRecording = true
-        }
+        .padding(EmpySpacing.md)
+        .frame(maxWidth: .infinity)
+        .background(Color(NSColor.controlBackgroundColor))
     }
 }
 
