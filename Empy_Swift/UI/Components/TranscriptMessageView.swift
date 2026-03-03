@@ -31,7 +31,7 @@ struct TranscriptMessageView: View {
             // Message text
             Text(message.text)
                 .font(.empyBody)
-                .foregroundColor(.empyPrimaryText)
+                .foregroundColor(.primary)
                 .opacity(message.isFinal ? 1.0 : 0.6)
         }
         .padding(.vertical, EmpySpacing.xs)
