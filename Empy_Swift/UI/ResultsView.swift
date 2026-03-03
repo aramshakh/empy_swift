@@ -34,7 +34,8 @@ struct ResultsView: View {
             // Stats
             HStack(spacing: 40) {
                 VStack {
-                    Text("\(transcript.split(separator: " ").count)")
+                    let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
+                    Text("\(wordCount)")
                         .font(.title)
                         .fontWeight(.bold)
                     Text("Words")
