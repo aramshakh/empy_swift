@@ -10,6 +10,7 @@ import SwiftUI
 struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var isPaused: Bool = false
+    @State private var transcriptMessages: [TranscriptMessage] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -27,6 +28,9 @@ struct RecordingView: View {
             controlBarView()
         }
         .navigationTitle("Recording")
+        .onAppear {
+            loadMockTranscript()
+        }
     }
     
     // MARK: - Sidebar
@@ -58,14 +62,23 @@ struct RecordingView: View {
     // MARK: - Transcript Area
     
     private func transcriptAreaView() -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: EmpySpacing.sm) {
-                Text("Transcript will appear here")
-                    .font(.empyBody)
-                    .foregroundColor(.empySecondaryText)
-                    .padding(EmpySpacing.md)
-                
-                Spacer()
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: EmpySpacing.sm) {
+                    ForEach(transcriptMessages) { message in
+                        TranscriptMessageView(message: message)
+                            .id(message.id)
+                    }
+                }
+                .padding(EmpySpacing.md)
+            }
+            .onChange(of: transcriptMessages.count) { _ in
+                // Auto-scroll to bottom when new message arrives
+                if let lastMessage = transcriptMessages.last {
+                    withAnimation {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
             }
         }
     }
@@ -101,6 +114,35 @@ struct RecordingView: View {
         .padding(EmpySpacing.md)
         .frame(maxWidth: .infinity)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - Mock Data
+    
+    private func loadMockTranscript() {
+        // Mock data for testing UI
+        transcriptMessages = [
+            TranscriptMessage(
+                id: UUID(),
+                speaker: .you,
+                text: "Hey, thanks for taking the call",
+                timestamp: Date(),
+                isFinal: true
+            ),
+            TranscriptMessage(
+                id: UUID(),
+                speaker: .participant(name: "Speaker 1"),
+                text: "No problem, happy to chat",
+                timestamp: Date().addingTimeInterval(4),
+                isFinal: true
+            ),
+            TranscriptMessage(
+                id: UUID(),
+                speaker: .you,
+                text: "So I wanted to discuss the project timeline",
+                timestamp: Date().addingTimeInterval(8),
+                isFinal: true
+            )
+        ]
     }
 }
 
