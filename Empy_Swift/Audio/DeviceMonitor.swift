@@ -2,81 +2,83 @@
 //  DeviceMonitor.swift
 //  Empy_Swift
 //
-//  Created by Orchestrator on 2026-03-03.
-//  Monitors audio route changes and detects device disconnections
+//  Refactored: 2026-03-03 (macOS APIs only)
+//  Port of empy-trone device monitoring
 //
 
-import Foundation
 import AVFoundation
 
 /// Delegate protocol for device monitoring events
 protocol DeviceMonitorDelegate: AnyObject {
-    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect reason: AVAudioSession.RouteChangeReason)
+    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect deviceName: String)
 }
 
-/// Monitors audio input device changes via AVAudioSession notifications
+/// Monitors audio device changes and disconnects
+///
+/// **macOS Implementation:** Uses AVAudioEngineConfigurationChange notification
+/// instead of iOS AVAudioSession route change notifications
 class DeviceMonitor {
     weak var delegate: DeviceMonitorDelegate?
+    
     private let logger: SessionLogger
+    private var configObserver: NSObjectProtocol?
+    private weak var engine: AVAudioEngine?
     
     init(logger: SessionLogger = .shared) {
         self.logger = logger
     }
     
-    /// Start monitoring audio route changes
-    func startMonitoring() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleRouteChange),
-            name: AVAudioSession.routeChangeNotification,
-            object: nil
-        )
-        logger.log(event: "device_monitor_started", layer: "audio")
+    deinit {
+        stopMonitoring()
     }
     
-    /// Stop monitoring audio route changes
-    func stopMonitoring() {
-        NotificationCenter.default.removeObserver(
-            self,
-            name: AVAudioSession.routeChangeNotification,
-            object: nil
-        )
-        logger.log(event: "device_monitor_stopped", layer: "audio")
-    }
-    
-    @objc private func handleRouteChange(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
-            return
+    /// Start monitoring audio device changes
+    /// - Parameter engine: The AVAudioEngine instance to monitor
+    func startMonitoring(engine: AVAudioEngine) {
+        self.engine = engine
+        
+        // Observe configuration changes (device disconnect, sample rate change, etc.)
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleConfigurationChange(notification)
         }
+        
+        logger.log(event: "device_monitoring_started", layer: "audio")
+    }
+    
+    /// Stop monitoring audio device changes
+    func stopMonitoring() {
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configObserver = nil
+        }
+        
+        engine = nil
+        logger.log(event: "device_monitoring_stopped", layer: "audio")
+    }
+    
+    /// Handle audio engine configuration changes
+    private func handleConfigurationChange(_ notification: Notification) {
+        guard let engine = engine else { return }
+        
+        let inputNode = engine.inputNode
+        let deviceName = inputNode.outputFormat(forBus: 0).channelCount > 0
+            ? "Audio Input Device"
+            : "Unknown Device"
         
         logger.log(
-            event: "audio_route_changed",
+            event: "device_config_changed",
             layer: "audio",
-            details: ["reason": describeReason(reason)]
+            details: [
+                "device": deviceName,
+                "is_running": "\(engine.isRunning)"
+            ]
         )
         
-        // Notify delegate only for device disconnections
-        switch reason {
-        case .oldDeviceUnavailable, .categoryChange:
-            delegate?.deviceMonitor(self, didDetectDisconnect: reason)
-        default:
-            break
-        }
-    }
-    
-    private func describeReason(_ reason: AVAudioSession.RouteChangeReason) -> String {
-        switch reason {
-        case .unknown: return "unknown"
-        case .newDeviceAvailable: return "new_device_available"
-        case .oldDeviceUnavailable: return "old_device_unavailable"
-        case .categoryChange: return "category_change"
-        case .override: return "override"
-        case .wakeFromSleep: return "wake_from_sleep"
-        case .noSuitableRouteForCategory: return "no_suitable_route"
-        case .routeConfigurationChange: return "route_config_change"
-        @unknown default: return "unknown_\(reason.rawValue)"
-        }
+        // Notify delegate about potential disconnect
+        delegate?.deviceMonitor(self, didDetectDisconnect: deviceName)
     }
 }
