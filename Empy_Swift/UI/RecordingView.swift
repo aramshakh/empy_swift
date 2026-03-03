@@ -3,6 +3,7 @@
 //  Empy_Swift
 //
 //  T11: Recording screen layout
+//  T16: Full audio integration
 //
 
 import SwiftUI
@@ -11,6 +12,11 @@ struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @State private var isPaused: Bool = false
     @State private var transcriptMessages: [TranscriptMessage] = []
+    
+    // T16: Audio integration components
+    @StateObject private var audioEngine = AudioEngine()
+    @StateObject private var deepgramClient = DeepgramClient()
+    @StateObject private var transcriptEngine = TranscriptEngine()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -29,7 +35,11 @@ struct RecordingView: View {
         }
         .navigationTitle("Recording")
         .onAppear {
-            loadMockTranscript()
+            setupAudioPipeline()
+            startRecording()
+        }
+        .onDisappear {
+            stopRecording()
         }
     }
     
@@ -93,7 +103,8 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                coordinator.endRecording(transcript: "Mock transcript from T11")
+                stopRecording()
+                coordinator.endRecording(transcript: generateTranscriptText())
             } label: {
                 HStack {
                     Image(systemName: "stop.fill")
@@ -121,33 +132,71 @@ struct RecordingView: View {
         .background(Color(NSColor.controlBackgroundColor))
     }
     
-    // MARK: - Mock Data
+    // MARK: - Audio Pipeline (T16)
     
-    private func loadMockTranscript() {
-        // Mock data for testing UI
-        transcriptMessages = [
-            TranscriptMessage(
-                id: UUID(),
-                speaker: .you,
-                text: "Hey, thanks for taking the call",
-                timestamp: Date(),
-                isFinal: true
-            ),
-            TranscriptMessage(
-                id: UUID(),
-                speaker: .participant(name: "Speaker 1"),
-                text: "No problem, happy to chat",
-                timestamp: Date().addingTimeInterval(4),
-                isFinal: true
-            ),
-            TranscriptMessage(
-                id: UUID(),
-                speaker: .you,
-                text: "So I wanted to discuss the project timeline",
-                timestamp: Date().addingTimeInterval(8),
-                isFinal: true
+    private func setupAudioPipeline() {
+        // 1. AudioEngine → DeepgramClient
+        audioEngine.onChunkReady = { audioData in
+            deepgramClient.send(audioData)
+        }
+        
+        // 2. DeepgramClient → TranscriptEngine
+        deepgramClient.onTranscriptionReceived = { result in
+            transcriptEngine.addTranscript(
+                text: result.channel.alternatives.first?.transcript ?? "",
+                isFinal: result.isFinal,
+                speaker: .you  // TODO: speaker diarization in future
             )
-        ]
+        }
+        
+        // 3. TranscriptEngine → UI
+        transcriptEngine.onMessageAdded = { message in
+            DispatchQueue.main.async {
+                if let index = transcriptMessages.firstIndex(where: { $0.id == message.id }) {
+                    // Update existing (interim → final)
+                    transcriptMessages[index] = message
+                } else {
+                    // Add new
+                    transcriptMessages.append(message)
+                }
+            }
+        }
+    }
+    
+    private func startRecording() {
+        Task {
+            do {
+                // Request mic permission
+                let granted = await audioEngine.requestPermission()
+                guard granted else {
+                    print("⚠️ Microphone permission denied")
+                    return
+                }
+                
+                // Connect Deepgram
+                try await deepgramClient.connect()
+                
+                // Start audio capture
+                try audioEngine.startRecording()
+                
+                print("✅ Recording started successfully")
+            } catch {
+                print("❌ Failed to start recording: \(error)")
+            }
+        }
+    }
+    
+    private func stopRecording() {
+        audioEngine.stopRecording()
+        deepgramClient.disconnect()
+        print("🛑 Recording stopped")
+    }
+    
+    private func generateTranscriptText() -> String {
+        transcriptMessages
+            .filter { $0.isFinal }
+            .map { $0.text }
+            .joined(separator: " ")
     }
 }
 
