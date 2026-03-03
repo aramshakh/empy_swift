@@ -226,28 +226,25 @@ class AudioEngine: ObservableObject {
         
         let frameLength = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
-        
-        var data = Data(capacity: frameLength * channelCount * MemoryLayout<Int16>.size)
+        let byteCount = frameLength * channelCount * MemoryLayout<Int16>.size
         
         // For interleaved format (macOS default)
         if buffer.format.isInterleaved {
             let ptr = channelData[0]
-            let bufferPointer = UnsafeBufferPointer(
-                start: ptr,
-                count: frameLength * channelCount
-            )
-            data.append(contentsOf: bufferPointer.map { $0 })
+            // Convert Int16 pointer to raw bytes
+            let data = Data(bytes: ptr, count: byteCount)
+            return data
         } else {
             // Non-interleaved: merge channels
+            var data = Data(capacity: byteCount)
             for frame in 0..<frameLength {
                 for channel in 0..<channelCount {
                     let sample = channelData[channel][frame]
                     withUnsafeBytes(of: sample.littleEndian) { data.append(contentsOf: $0) }
                 }
             }
+            return data
         }
-        
-        return data
     }
     
     /// Stop capturing audio
