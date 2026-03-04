@@ -3,14 +3,20 @@
 //  Empy_Swift
 //
 //  T11: Recording screen layout
+//  T16: Audio integration with corrected API calls
 //
 
 import SwiftUI
+import Combine
 
 struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
+    @StateObject private var audioEngine = AudioEngine()
+    @StateObject private var deepgramClient = DeepgramClient()
+    @StateObject private var transcriptEngine = TranscriptEngine()
     @State private var isPaused: Bool = false
     @State private var transcriptMessages: [TranscriptMessage] = []
+    @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -29,8 +35,73 @@ struct RecordingView: View {
         }
         .navigationTitle("Recording")
         .onAppear {
-            loadMockTranscript()
+            setupAudioPipeline()
+            startRecording()
         }
+        .onDisappear {
+            stopRecording()
+        }
+    }
+    
+    // MARK: - Audio Pipeline Setup
+    
+    private func setupAudioPipeline() {
+        // 1. AudioEngine → DeepgramClient
+        audioEngine.onChunk = { [weak deepgramClient] audioChunk in
+            deepgramClient?.send(audioData: audioChunk.data)
+        }
+        
+        // 2. TranscriptEngine observes DeepgramClient internally via delegate
+        // Just observe the published state:
+        transcriptEngine.$transcriptState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                self?.transcriptMessages = state.segments.map { segment in
+                    TranscriptMessage(
+                        speaker: .you,
+                        text: segment.text,
+                        timestamp: Date(),
+                        isFinal: segment.isFinal
+                    )
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func startRecording() {
+        Task {
+            do {
+                // TranscriptEngine.startSession() connects Deepgram internally
+                transcriptEngine.startSession()
+                
+                // Start audio capture (handles permission internally)
+                try audioEngine.start()
+            } catch {
+                print("Failed to start recording: \(error)")
+            }
+        }
+    }
+    
+    private func stopRecording() {
+        audioEngine.stop()
+        transcriptEngine.endSession()
+    }
+    
+    // MARK: - Talk Ratio Calculation
+    
+    private func calculateTalkRatio() -> Double {
+        let messages = transcriptEngine.transcriptState.segments
+        guard !messages.isEmpty else { return 0.5 }
+        
+        let userWords = messages
+            .filter { $0.speaker == .you }
+            .reduce(0) { $0 + $1.text.split(separator: " ").count }
+        
+        let totalWords = messages
+            .reduce(0) { $0 + $1.text.split(separator: " ").count }
+        
+        guard totalWords > 0 else { return 0.5 }
+        return Double(userWords) / Double(totalWords)
     }
     
     // MARK: - Sidebar
@@ -39,6 +110,9 @@ struct RecordingView: View {
         VStack(alignment: .leading, spacing: EmpySpacing.md) {
             // Session timer at top
             SessionTimerView()
+            
+            // Talk ratio indicator
+            TalkRatioView(userPercentage: calculateTalkRatio())
             
             Divider()
             
@@ -119,35 +193,6 @@ struct RecordingView: View {
         .padding(EmpySpacing.md)
         .frame(maxWidth: .infinity)
         .background(Color(NSColor.controlBackgroundColor))
-    }
-    
-    // MARK: - Mock Data
-    
-    private func loadMockTranscript() {
-        // Mock data for testing UI
-        transcriptMessages = [
-            TranscriptMessage(
-                id: UUID(),
-                speaker: .you,
-                text: "Hey, thanks for taking the call",
-                timestamp: Date(),
-                isFinal: true
-            ),
-            TranscriptMessage(
-                id: UUID(),
-                speaker: .participant(name: "Speaker 1"),
-                text: "No problem, happy to chat",
-                timestamp: Date().addingTimeInterval(4),
-                isFinal: true
-            ),
-            TranscriptMessage(
-                id: UUID(),
-                speaker: .you,
-                text: "So I wanted to discuss the project timeline",
-                timestamp: Date().addingTimeInterval(8),
-                isFinal: true
-            )
-        ]
     }
 }
 
