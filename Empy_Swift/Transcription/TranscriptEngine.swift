@@ -119,81 +119,88 @@ class TranscriptEngine: ObservableObject {
 
 extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
-        let now = Date()
-        
-        // Ignore partials that arrive shortly after a final (out-of-order protection)
-        if let lastFinal = lastFinalTimestamp, now.timeIntervalSince(lastFinal) < 1.0 {
-            logger.log(
-                event: "transcript_partial_ignored",
-                layer: "transcript",
-                details: ["reason": "recent_final"]
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let now = Date()
+            
+            // Ignore partials that arrive shortly after a final (out-of-order protection)
+            if let lastFinal = self.lastFinalTimestamp, now.timeIntervalSince(lastFinal) < 1.0 {
+                self.logger.log(
+                    event: "transcript_partial_ignored",
+                    layer: "transcript",
+                    details: ["reason": "recent_final"]
+                )
+                return
+            }
+            
+            // Remove previous partial
+            if let lastID = self.lastPartialID {
+                self.partialSegments.removeValue(forKey: lastID)
+                self.transcriptState.segments.removeAll { $0.id == lastID }
+            }
+            
+            // Add new partial
+            let segment = TranscriptSegment(
+                text: transcript,
+                confidence: 0.0, // Partials have unknown confidence
+                isFinal: false
             )
-            return
+            
+            self.partialSegments[segment.id] = segment
+            self.lastPartialID = segment.id
+            self.transcriptState.segments.append(segment)
+            
+            let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
+            self.logger.log(
+                event: "transcript_partial_received",
+                layer: "transcript",
+                details: [
+                    "length": "\(transcript.count)",
+                    "words": "\(wordCount)"
+                ]
+            )
         }
-        
-        // Remove previous partial
-        if let lastID = lastPartialID {
-            partialSegments.removeValue(forKey: lastID)
-            transcriptState.segments.removeAll { $0.id == lastID }
-        }
-        
-        // Add new partial
-        let segment = TranscriptSegment(
-            text: transcript,
-            confidence: 0.0, // Partials have unknown confidence
-            isFinal: false
-        )
-        
-        partialSegments[segment.id] = segment
-        lastPartialID = segment.id
-        transcriptState.segments.append(segment)
-        
-        let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
-        logger.log(
-            event: "transcript_partial_received",
-            layer: "transcript",
-            details: [
-                "length": "\(transcript.count)",
-                "words": "\(wordCount)"
-            ]
-        )
     }
     
     func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String) {
         guard !transcript.isEmpty else { return }
         
-        // Remove any partial segments (replaced by final)
-        if let lastID = lastPartialID {
-            partialSegments.removeValue(forKey: lastID)
-            transcriptState.segments.removeAll { $0.id == lastID }
-            lastPartialID = nil
-        }
-        
-        // Split transcript into sentences for chat-like display
-        let sentences = splitIntoSentences(transcript)
-        
-        for sentence in sentences {
-            let segment = TranscriptSegment(
-                text: sentence,
-                confidence: 1.0,
-                isFinal: true
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Remove any partial segments (replaced by final)
+            if let lastID = self.lastPartialID {
+                self.partialSegments.removeValue(forKey: lastID)
+                self.transcriptState.segments.removeAll { $0.id == lastID }
+                self.lastPartialID = nil
+            }
+            
+            // Split transcript into sentences for chat-like display
+            let sentences = self.splitIntoSentences(transcript)
+            
+            for sentence in sentences {
+                let segment = TranscriptSegment(
+                    text: sentence,
+                    confidence: 1.0,
+                    isFinal: true
+                )
+                self.transcriptState.segments.append(segment)
+            }
+            
+            self.lastFinalTimestamp = Date()
+            
+            let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
+            self.logger.log(
+                event: "transcript_final_received",
+                layer: "transcript",
+                details: [
+                    "text": String(transcript.prefix(50)),
+                    "word_count": "\(wordCount)",
+                    "sentences": "\(sentences.count)",
+                    "total_words": "\(self.transcriptState.wordCount)"
+                ]
             )
-            transcriptState.segments.append(segment)
         }
-        
-        lastFinalTimestamp = Date()
-        
-        let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
-        logger.log(
-            event: "transcript_final_received",
-            layer: "transcript",
-            details: [
-                "text": String(transcript.prefix(50)),
-                "word_count": "\(wordCount)",
-                "sentences": "\(sentences.count)",
-                "total_words": "\(transcriptState.wordCount)"
-            ]
-        )
     }
     
     /// Split text into sentences for better chat-like display
