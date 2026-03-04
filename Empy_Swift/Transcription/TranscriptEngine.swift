@@ -59,6 +59,32 @@ class TranscriptEngine: ObservableObject {
     
     /// End transcription session
     func endSession() {
+        // Convert any pending partial to final before disconnecting
+        if let lastID = lastPartialID,
+           let partialSegment = partialSegments[lastID] {
+            // Remove partial
+            transcriptState.segments.removeAll { $0.id == lastID }
+            partialSegments.removeValue(forKey: lastID)
+            
+            // Add as final
+            let finalSegment = TranscriptSegment(
+                text: partialSegment.text,
+                speaker: partialSegment.speaker,
+                startTime: partialSegment.startTime,
+                endTime: partialSegment.endTime,
+                confidence: partialSegment.confidence,
+                isFinal: true
+            )
+            transcriptState.segments.append(finalSegment)
+            lastPartialID = nil
+            
+            logger.log(
+                event: "transcript_partial_finalized_on_stop",
+                layer: "transcript",
+                details: ["text": String(partialSegment.text.prefix(50))]
+            )
+        }
+        
         deepgramClient.disconnect()
         logger.log(
             event: "transcription_session_ended",
