@@ -59,6 +59,7 @@ class TranscriptEngine: ObservableObject {
     /// End transcription session
     func endSession() {
         deepgramClient.disconnect()
+        persistCurrentSession()
         logger.log(
             event: "transcription_session_ended",
             layer: "transcript",
@@ -83,12 +84,52 @@ class TranscriptEngine: ObservableObject {
     func processAudioChunk(_ audioData: Data) {
         deepgramClient.send(audioData: audioData)
     }
+    
+    private func persistCurrentSession() {
+        let finalSegments = transcriptState.segments.filter { $0.isFinal }
+        guard !finalSegments.isEmpty else { return }
+
+        do {
+            let fm = FileManager.default
+            let appSupport = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let dir = appSupport
+                .appendingPathComponent("com.empy.Empy_Swift", isDirectory: true)
+                .appendingPathComponent("transcripts", isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            let filename = "session_\(formatter.string(from: Date())).json"
+            let fileURL = dir.appendingPathComponent(filename)
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(finalSegments)
+            try data.write(to: fileURL)
+
+            logger.log(
+                event: "transcript_session_persisted",
+                layer: "transcript",
+                details: [
+                    "path": fileURL.path,
+                    "segments": "\(finalSegments.count)"
+                ]
+            )
+        } catch {
+            logger.log(
+                event: "transcript_session_persist_failed",
+                layer: "transcript",
+                details: ["error": error.localizedDescription]
+            )
+        }
+    }
 }
 
 // MARK: - DeepgramClientDelegate
 
 extension TranscriptEngine: DeepgramClientDelegate {
-    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
+    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String, speaker: String?) {
         let now = Date()
         
         // Ignore partials that arrive shortly after a final (out-of-order protection)
@@ -110,6 +151,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
         // Add new partial
         let segment = TranscriptSegment(
             text: transcript,
+            speaker: speaker,
             confidence: 0.0, // Partials have unknown confidence
             isFinal: false
         )
@@ -129,7 +171,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
         )
     }
     
-    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String) {
+    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String, speaker: String?) {
         guard !transcript.isEmpty else { return }
         
         // Remove any partial segments (replaced by final)
@@ -142,6 +184,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
         // Add final segment
         let segment = TranscriptSegment(
             text: transcript,
+            speaker: speaker,
             confidence: 1.0, // Finals are high confidence
             isFinal: true
         )

@@ -68,9 +68,10 @@ struct RecordingView: View {
             .sink { state in
                 transcriptMessages = state.segments.map { segment in
                     TranscriptMessage(
-                        speaker: .you,
+                        id: segment.id,
+                        speaker: segment.speaker == "other" ? .participant(name: "Other") : .you,
                         text: segment.text,
-                        timestamp: Date(),
+                        timestamp: segment.timestamp,
                         isFinal: segment.isFinal
                     )
                 }

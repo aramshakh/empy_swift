@@ -30,6 +30,7 @@ struct DeepgramTranscriptResult: Codable {
         let start: Double
         let end: Double
         let confidence: Double
+        let speaker: Int?
     }
 }
 

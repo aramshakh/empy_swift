@@ -9,7 +9,7 @@
 import Foundation
 
 /// A segment of transcribed speech
-struct TranscriptSegment: Identifiable, Equatable {
+struct TranscriptSegment: Identifiable, Equatable, Codable {
     let id: UUID
     let text: String
     let speaker: String? // Optional speaker label

@@ -14,8 +14,8 @@ extension Notification.Name {
 
 /// Delegate protocol for Deepgram transcription events
 protocol DeepgramClientDelegate: AnyObject {
-    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String)
-    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String)
+    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String, speaker: String?)
+    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String, speaker: String?)
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error)
     func deepgramClientDidConnect(_ client: DeepgramClient)
     func deepgramClientDidDisconnect(_ client: DeepgramClient)
@@ -132,7 +132,8 @@ class DeepgramClient {
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "endpointing", value: "true"),
-            URLQueryItem(name: "utterance_end_ms", value: "1000")
+            URLQueryItem(name: "utterance_end_ms", value: "1000"),
+            URLQueryItem(name: "diarize", value: "true")
         ]
         return components.url!
     }
@@ -209,6 +210,9 @@ class DeepgramClient {
         flushAudioBuffer()
         delegate?.deepgramClientDidConnect(self)
         
+        // Resolve speaker label from diarization words (best effort)
+        let speaker = resolveSpeaker(from: alternative.words)
+
         // Emit partial or final transcript
         if result.isFinal == true || result.speechFinal == true {
             logger.log(
@@ -219,10 +223,10 @@ class DeepgramClient {
                     "confidence": String(format: "%.2f", alternative.confidence)
                 ]
             )
-            delegate?.deepgramClient(self, didReceiveFinalTranscript: transcript)
+            delegate?.deepgramClient(self, didReceiveFinalTranscript: transcript, speaker: speaker)
         } else {
             logger.log(event: "deepgram_partial_transcript", layer: "transcription")
-            delegate?.deepgramClient(self, didReceivePartialTranscript: transcript)
+            delegate?.deepgramClient(self, didReceivePartialTranscript: transcript, speaker: speaker)
         }
     }
     
@@ -237,6 +241,20 @@ class DeepgramClient {
         )
     }
     
+    private func resolveSpeaker(from words: [DeepgramTranscriptResult.Word]?) -> String? {
+        guard let words, !words.isEmpty else { return nil }
+        let ids = words.compactMap { $0.speaker }
+        guard !ids.isEmpty else { return nil }
+
+        let grouped = Dictionary(grouping: ids, by: { $0 })
+        guard let dominant = grouped.max(by: { $0.value.count < $1.value.count })?.key else {
+            return nil
+        }
+
+        // Map Deepgram speaker index to app labels
+        return dominant == 0 ? "you" : "other"
+    }
+
     private func handleError(_ error: DeepgramError) {
         logger.log(
             event: "deepgram_api_error",
