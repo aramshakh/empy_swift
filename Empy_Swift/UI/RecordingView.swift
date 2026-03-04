@@ -172,7 +172,12 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                coordinator.endRecording(transcript: "Mock transcript from T11")
+                sessionManager.stopRecording()
+                let finalTranscript = transcriptEngine.transcriptState.fullText
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                coordinator.endRecording(
+                    transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
+                )
             } label: {
                 HStack {
                     Image(systemName: "stop.fill")
