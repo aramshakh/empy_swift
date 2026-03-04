@@ -145,6 +145,8 @@ class AudioEngine: ObservableObject {
         // Buffer size: ~100ms at target sample rate = 1600 frames
         let bufferSize: AVAudioFrameCount = 1600
         
+        // CRITICAL FIX: Remove existing tap to prevent crash
+        inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, time in
             guard let self = self, let emitter = self.chunkEmitter else { return }
             
