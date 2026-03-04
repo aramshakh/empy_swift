@@ -18,7 +18,7 @@ extension Notification.Name {
 /// 
 /// **macOS Implementation:** Uses AVAudioEngine directly without AVAudioSession
 /// (AVAudioSession is iOS-only and does not exist on macOS)
-class AudioEngine: ObservableObject {
+class AudioEngine: NSObject, ObservableObject {
     /// Whether the engine is currently capturing audio
     @Published var isCapturing: Bool = false
     
@@ -35,6 +35,7 @@ class AudioEngine: ObservableObject {
     private var systemChunkEmitter: ChunkEmitter?
     
     /// ScreenCaptureKit stream for system audio capture
+    @available(macOS 12.3, *)
     private var screenCaptureStream: SCStream?
     
     /// Device monitor for handling audio route changes
@@ -57,6 +58,7 @@ class AudioEngine: ObservableObject {
     init(logger: SessionLogger = .shared) {
         self.logger = logger
         self.deviceMonitor = DeviceMonitor(logger: logger)
+        super.init()
         deviceMonitor.delegate = self
     }
     
@@ -190,7 +192,11 @@ class AudioEngine: ObservableObject {
         try engine.start()
         
         // Start system audio capture (best effort; microphone keeps working if this fails)
-        startSystemAudioCapture()        
+        if #available(macOS 12.3, *) {
+            startSystemAudioCapture()
+        } else {
+            logger.log(event: "system_audio_unavailable_os", layer: "audio")
+        }
         DispatchQueue.main.async {
             self.isCapturing = true
         }
@@ -264,6 +270,7 @@ class AudioEngine: ObservableObject {
         }
     }
     
+    @available(macOS 12.3, *)
     private func startSystemAudioCapture() {
         Task { [weak self] in
             guard let self else { return }
@@ -294,6 +301,7 @@ class AudioEngine: ObservableObject {
         }
     }
 
+    @available(macOS 12.3, *)
     private func stopSystemAudioCapture() {
         guard let stream = screenCaptureStream else { return }
         Task {
@@ -306,7 +314,9 @@ class AudioEngine: ObservableObject {
     /// Stop capturing audio
     func stop() {
         deviceMonitor.stopMonitoring()
-        stopSystemAudioCapture()
+        if #available(macOS 12.3, *) {
+            stopSystemAudioCapture()
+        }
         
         if engine.isRunning {
             engine.stop()
@@ -375,6 +385,7 @@ class AudioEngine: ObservableObject {
 }
 
 // MARK: - ScreenCaptureKit
+@available(macOS 12.3, *)
 extension AudioEngine: SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         logger.log(
@@ -395,9 +406,19 @@ extension AudioEngine: SCStreamOutput, SCStreamDelegate {
 
         let length = CMBlockBufferGetDataLength(blockBuffer)
         var data = Data(count: length)
+        var copyStatus: OSStatus = noErr
         data.withUnsafeMutableBytes { rawBuffer in
             guard let baseAddress = rawBuffer.baseAddress else { return }
-            _ = CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
+            copyStatus = CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
+        }
+
+        guard copyStatus == noErr else {
+            logger.log(
+                event: "system_audio_copy_failed",
+                layer: "audio",
+                details: ["status": "\(copyStatus)"]
+            )
+            return
         }
 
         emitter.append(samples: data, source: .system)
