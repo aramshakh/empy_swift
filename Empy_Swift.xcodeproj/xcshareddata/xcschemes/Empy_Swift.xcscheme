@@ -59,7 +59,7 @@
          <EnvironmentVariable
             key = "EMPY_DEEPGRAM_KEY"
             value = "f4fe1258da8c5ed60c31fe20d6be30169aa29fd1"
-            isEnabled = "NO">
+            isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
