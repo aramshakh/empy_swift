@@ -24,8 +24,10 @@ class ChunkEmitter {
     }
     
     /// Append audio samples to the buffer and emit chunks when ready
-    /// - Parameter samples: Raw PCM data to append
-    func append(samples: Data) {
+    /// - Parameters:
+    ///   - samples: Raw PCM data to append
+    ///   - source: Source stream for emitted chunk
+    func append(samples: Data, source: AudioSource = .microphone) {
         buffer.append(samples)
         
         // Emit chunks while we have enough data
@@ -36,7 +38,8 @@ class ChunkEmitter {
                 seqId: seqId,
                 pcmData: Data(chunkData),
                 sessionElapsedMs: calculateElapsed(),
-                byteCount: chunkSize
+                byteCount: chunkSize,
+                source: source
             )
             
             onChunk?(chunk)

@@ -8,6 +8,7 @@
 
 import AVFoundation
 import Combine
+import ScreenCaptureKit
 
 extension Notification.Name {
     static let audioEngineFailed = Notification.Name("audioEngineFailed")
@@ -27,8 +28,14 @@ class AudioEngine: ObservableObject {
     /// AVAudioEngine instance
     private let engine = AVAudioEngine()
     
-    /// Chunk emitter for buffering and emitting audio chunks
+    /// Chunk emitter for microphone stream
     private var chunkEmitter: ChunkEmitter?
+    
+    /// Chunk emitter for system audio stream
+    private var systemChunkEmitter: ChunkEmitter?
+    
+    /// ScreenCaptureKit stream for system audio capture
+    private var screenCaptureStream: SCStream?
     
     /// Device monitor for handling audio route changes
     private let deviceMonitor: DeviceMonitor
@@ -134,12 +141,18 @@ class AudioEngine: ObservableObject {
             ]
         )
         
-        // Create chunk emitter
+        // Create chunk emitters
         let emitter = ChunkEmitter()
         emitter.onChunk = { [weak self] chunk in
             self?.onChunk?(chunk)
         }
         self.chunkEmitter = emitter
+        
+        let systemEmitter = ChunkEmitter()
+        systemEmitter.onChunk = { [weak self] chunk in
+            self?.onChunk?(chunk)
+        }
+        self.systemChunkEmitter = systemEmitter
         
         // Install tap on input node
         // Buffer size: ~100ms at target sample rate = 1600 frames
@@ -160,8 +173,8 @@ class AudioEngine: ObservableObject {
                 return
             }
             
-            // Append to chunk emitter
-            emitter.append(samples: pcmData)
+            // Append microphone chunk
+            emitter.append(samples: pcmData, source: .microphone)
         }
         
         // Observe configuration changes (device disconnect, sample rate change)
@@ -176,6 +189,8 @@ class AudioEngine: ObservableObject {
         // Start the engine
         try engine.start()
         
+        // Start system audio capture (best effort; microphone keeps working if this fails)
+        startSystemAudioCapture()        
         DispatchQueue.main.async {
             self.isCapturing = true
         }
@@ -249,9 +264,49 @@ class AudioEngine: ObservableObject {
         }
     }
     
+    private func startSystemAudioCapture() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first else { return }
+
+                let config = SCStreamConfiguration()
+                config.capturesAudio = true
+                config.excludesCurrentProcessAudio = true
+                config.sampleRate = 16_000
+                config.channelCount = 1
+
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let stream = SCStream(filter: filter, configuration: config, delegate: self)
+                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInitiated))
+                self.screenCaptureStream = stream
+                try await stream.startCapture()
+
+                self.logger.log(event: "system_audio_started", layer: "audio")
+            } catch {
+                self.logger.log(
+                    event: "system_audio_start_failed",
+                    layer: "audio",
+                    details: ["error": error.localizedDescription]
+                )
+            }
+        }
+    }
+
+    private func stopSystemAudioCapture() {
+        guard let stream = screenCaptureStream else { return }
+        Task {
+            try? await stream.stopCapture()
+        }
+        screenCaptureStream = nil
+        systemChunkEmitter = nil
+    }
+
     /// Stop capturing audio
     func stop() {
         deviceMonitor.stopMonitoring()
+        stopSystemAudioCapture()
         
         if engine.isRunning {
             engine.stop()
@@ -316,6 +371,36 @@ class AudioEngine: ObservableObject {
         try setupEngine()
         
         logger.log(event: "engine_restart_success", layer: "audio")
+    }
+}
+
+// MARK: - ScreenCaptureKit
+extension AudioEngine: SCStreamOutput, SCStreamDelegate {
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        logger.log(
+            event: "system_audio_stream_stopped",
+            layer: "audio",
+            details: ["error": error.localizedDescription]
+        )
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .audio else { return }
+        guard let blockBuffer = sampleBuffer.dataBuffer else { return }
+        guard let emitter = systemChunkEmitter else { return }
+
+        let length = CMBlockBufferGetDataLength(blockBuffer)
+        var data = Data(count: length)
+        data.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            _ = CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: baseAddress)
+        }
+
+        emitter.append(samples: data, source: .system)
     }
 }
 

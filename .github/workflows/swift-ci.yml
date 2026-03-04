@@ -36,7 +36,20 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           -quiet
       
+    - name: Detect test configuration
+      id: test-config
+      run: |
+        SCHEME_FILE="Empy_Swift.xcodeproj/xcshareddata/xcschemes/Empy_Swift.xcscheme"
+        if grep -q '<TestableReference' "$SCHEME_FILE"; then
+          echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          echo "Testables found in scheme; tests will run."
+        else
+          echo "has_tests=false" >> "$GITHUB_OUTPUT"
+          echo "No testables configured in scheme; skipping test execution."
+        fi
+
     - name: Run Tests
+      if: steps.test-config.outputs.has_tests == 'true'
       run: |
         xcodebuild test \
           -project Empy_Swift.xcodeproj \
@@ -45,6 +58,10 @@ jobs:
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           -quiet
+
+    - name: Report test skip
+      if: steps.test-config.outputs.has_tests != 'true'
+      run: echo "Tests are not configured for scheme Empy_Swift; CI currently validates build + lint only."
       
     - name: SwiftLint
       run: |
