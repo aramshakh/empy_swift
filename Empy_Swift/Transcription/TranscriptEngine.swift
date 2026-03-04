@@ -58,7 +58,10 @@ class TranscriptEngine: ObservableObject {
     }
     
     /// End transcription session
-    func endSession() {
+    func endSession() async {
+        // Give Deepgram time to send final transcripts before disconnecting
+        try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+        
         // Convert any pending partial to final before disconnecting
         if let lastID = lastPartialID,
            let partialSegment = partialSegments[lastID] {
