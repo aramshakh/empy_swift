@@ -135,7 +135,7 @@ class DeepgramClient {
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "endpointing", value: "true"),
             URLQueryItem(name: "utterance_end_ms", value: "1000"),
-            URLQueryItem(name: "detect_language", value: "true")
+            URLQueryItem(name: "model", value: "nova-2")
         ]
         return components.url!
     }
