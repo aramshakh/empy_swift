@@ -10,6 +10,7 @@ import SwiftUI
 @main
 struct Empy_SwiftApp: App {
     @StateObject private var coordinator = NavigationCoordinator()
+    @StateObject private var sessionManager = SessionManager.shared
     
     init() {
         // Log configuration status on startup
@@ -32,6 +33,8 @@ struct Empy_SwiftApp: App {
                     }
             }
             .environmentObject(coordinator)
+            .environmentObject(sessionManager)
+            .environmentObject(sessionManager.transcript)
         }
     }
 }

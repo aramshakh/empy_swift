@@ -12,6 +12,7 @@ import Foundation
 struct TranscriptSegment: Identifiable, Equatable {
     let id: UUID
     let text: String
+    let speaker: String? // Optional speaker label
     let startTime: TimeInterval
     let endTime: TimeInterval
     let confidence: Double
@@ -20,6 +21,7 @@ struct TranscriptSegment: Identifiable, Equatable {
     
     init(
         text: String,
+        speaker: String? = nil,
         startTime: TimeInterval = 0,
         endTime: TimeInterval = 0,
         confidence: Double,
@@ -27,6 +29,7 @@ struct TranscriptSegment: Identifiable, Equatable {
     ) {
         self.id = UUID()
         self.text = text
+        self.speaker = speaker
         self.startTime = startTime
         self.endTime = endTime
         self.confidence = confidence
