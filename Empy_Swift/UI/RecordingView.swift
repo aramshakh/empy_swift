@@ -61,9 +61,8 @@ struct RecordingView: View {
         // Use incremental updates instead of full array replacement
         transcriptEngine.$transcriptState
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                guard let self = self else { return }
-                self.updateTranscriptMessages(from: state.segments)
+            .sink { state in
+                updateTranscriptMessages(from: state.segments)
             }
             .store(in: &cancellables)
     }
