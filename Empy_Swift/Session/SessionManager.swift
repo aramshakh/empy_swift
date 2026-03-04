@@ -142,7 +142,11 @@ class SessionManager: ObservableObject {
         
         // Stop components
         audioEngine.stop()
-        transcriptEngine.endSession()
+        
+        // End transcription session async (waits for final transcripts)
+        Task {
+            await transcriptEngine.endSession()
+        }
         
         // Clear subscriptions
         deepgramCancellable?.cancel()
