@@ -31,11 +31,34 @@ enum AppConfig {
         return key != "DEMO_KEY_REPLACE_ME" && !key.isEmpty
     }
     
+    /// Empy backend API base URL
+    ///
+    /// Reads from `EMPY_API_URL` environment variable.
+    /// Falls back to localhost:8081 for development.
+    static var empyAPIBaseURL: String {
+        if let envURL = ProcessInfo.processInfo.environment["EMPY_API_URL"], !envURL.isEmpty {
+            return envURL
+        }
+        return "http://localhost:8081"
+    }
+    
+    /// User ID for API calls
+    ///
+    /// Reads from `EMPY_USER_ID` environment variable.
+    /// Falls back to a process-based identifier.
+    static var userId: String {
+        if let envId = ProcessInfo.processInfo.environment["EMPY_USER_ID"], !envId.isEmpty {
+            return envId
+        }
+        return "swift-user-\(ProcessInfo.processInfo.processIdentifier)"
+    }
+    
     /// Log configuration status on startup
     ///
     /// Logs whether Deepgram key is present without exposing the actual value
     static func logStartupConfig() {
         let keyPresent = hasValidDeepgramKey
-        print("🔑 Deepgram key present: \(keyPresent)")
+        print("Deepgram key present: \(keyPresent)")
+        print("API base URL: \(empyAPIBaseURL)")
     }
 }

@@ -29,12 +29,17 @@ struct CoachCard: Identifiable {
     let title: String
     let message: String
     let timestamp: Date
+    let nudgeId: String?
+    let conversationId: String?
     
-    init(type: CoachCardType, title: String, message: String) {
+    init(type: CoachCardType, title: String, message: String,
+         nudgeId: String? = nil, conversationId: String? = nil) {
         self.id = UUID()
         self.type = type
         self.title = title
         self.message = message
         self.timestamp = Date()
+        self.nudgeId = nudgeId
+        self.conversationId = conversationId
     }
 }

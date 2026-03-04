@@ -27,4 +27,10 @@ enum FeatureFlags {
     /// When disabled, no language param is sent (Deepgram auto-detects
     /// from its general model).
     static let multilingualEnabled: Bool = true
+    
+    /// Enable Empy backend API integration
+    ///
+    /// When disabled, coach cards remain mock and no API calls are made.
+    /// Useful for offline development/testing.
+    static let empyAPIEnabled: Bool = true
 }

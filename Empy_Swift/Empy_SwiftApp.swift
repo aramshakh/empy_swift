@@ -35,6 +35,7 @@ struct Empy_SwiftApp: App {
             .environmentObject(coordinator)
             .environmentObject(sessionManager)
             .environmentObject(sessionManager.transcript)
+            .environmentObject(sessionManager.conversation)
         }
     }
 }

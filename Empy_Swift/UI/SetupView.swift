@@ -38,6 +38,7 @@ enum CallType: String, CaseIterable, Identifiable {
 struct SetupView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var coordinator: NavigationCoordinator
+    @EnvironmentObject var sessionManager: SessionManager
     
     @State private var selectedCallType: CallType = .fundraising
     @State private var participantContext: String = ""
@@ -72,6 +73,8 @@ struct SetupView: View {
                             
                             // Submit button
                             EmpyButton(title: "Create conversation") {
+                                sessionManager.callType = selectedCallType.rawValue
+                                sessionManager.participantContext = participantContext
                                 coordinator.startRecording()
                             }
                         }

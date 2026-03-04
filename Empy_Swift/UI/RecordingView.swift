@@ -13,10 +13,10 @@ struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @EnvironmentObject var sessionManager: SessionManager
     @EnvironmentObject var transcriptEngine: TranscriptEngine
+    @EnvironmentObject var conversationManager: ConversationManager
     @State private var isPaused: Bool = false
     @State private var transcriptMessages: [TranscriptMessage] = []
     @State private var cancellables = Set<AnyCancellable>()
-    @State private var coachCards: [CoachCard] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -36,9 +36,9 @@ struct RecordingView: View {
         .navigationTitle("Recording")
         .overlay(alignment: .topTrailing) {
             VStack(spacing: EmpySpacing.md) {
-                ForEach(coachCards) { card in
+                ForEach(conversationManager.coachCards) { card in
                     CoachCardView(card: card) {
-                        coachCards.removeAll { $0.id == card.id }
+                        conversationManager.dismissCard(card)
                     }
                 }
             }
@@ -48,11 +48,6 @@ struct RecordingView: View {
         .onAppear {
             setupObservers()
             startRecording()
-            
-            // Test: show card after 3 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                addMockCoachCard()
-            }
         }
         .onDisappear {
             stopRecording()
@@ -92,23 +87,6 @@ struct RecordingView: View {
         sessionManager.stopRecording()
     }
     
-    // MARK: - Talk Ratio Calculation
-    
-    private func calculateTalkRatio() -> Double {
-        let messages = transcriptEngine.transcriptState.segments
-        guard !messages.isEmpty else { return 0.5 }
-        
-        let userWords = messages
-            .filter { $0.speaker == "you" }
-            .reduce(0) { $0 + $1.text.split(separator: " ").count }
-        
-        let totalWords = messages
-            .reduce(0) { $0 + $1.text.split(separator: " ").count }
-        
-        guard totalWords > 0 else { return 0.5 }
-        return Double(userWords) / Double(totalWords)
-    }
-    
     // MARK: - Sidebar
     
     private func sidebarView() -> some View {
@@ -116,8 +94,8 @@ struct RecordingView: View {
             // Session timer at top
             SessionTimerView()
             
-            // Talk ratio indicator
-            TalkRatioView(userPercentage: calculateTalkRatio())
+            // Talk ratio indicator (real data from API, defaults to 0.5 until data arrives)
+            TalkRatioView(userPercentage: conversationManager.speakingRatioMe)
             
             Divider()
             
@@ -125,8 +103,18 @@ struct RecordingView: View {
                 .font(.empyLabel)
                 .foregroundColor(.empySecondaryText)
             
-            Text("Stats placeholder")
-                .font(.empyCaption)
+            if let stats = conversationManager.latestStatistics,
+               let ratio = stats.speakingRatio {
+                VStack(alignment: .leading, spacing: EmpySpacing.xs) {
+                    ForEach(Array(ratio.speakers.sorted(by: { $0.key < $1.key })), id: \.key) { speaker, pct in
+                        statsRow(label: speaker, value: "\(Int(pct * 100))%")
+                    }
+                }
+            } else {
+                Text("Waiting for data…")
+                    .font(.empyCaption)
+                    .foregroundColor(.empySecondaryText)
+            }
             
             Divider()
             
@@ -134,13 +122,36 @@ struct RecordingView: View {
                 .font(.empyLabel)
                 .foregroundColor(.empySecondaryText)
             
-            Text("Coach cards placeholder")
+            let cardCount = conversationManager.coachCards.count
+            Text(cardCount == 0 ? "No cards yet" : "\(cardCount) active")
                 .font(.empyCaption)
+                .foregroundColor(.empySecondaryText)
+            
+            if conversationManager.isProcessing {
+                HStack(spacing: EmpySpacing.xs) {
+                    ProgressView().scaleEffect(0.6)
+                    Text("Analyzing…")
+                        .font(.empyCaption)
+                        .foregroundColor(.empySecondaryText)
+                }
+            }
             
             Spacer()
         }
         .padding(EmpySpacing.md)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    private func statsRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.empyCaption)
+                .foregroundColor(.empySecondaryText)
+            Spacer()
+            Text(value)
+                .font(.empyCaption)
+                .fontWeight(.medium)
+        }
     }
     
     // MARK: - Transcript Area
@@ -209,24 +220,6 @@ struct RecordingView: View {
         .background(Color(NSColor.controlBackgroundColor))
     }
     
-    // MARK: - Mock Coach Cards (for testing)
-    
-    private func addMockCoachCard() {
-        let mockCards: [(CoachCardType, String, String)] = [
-            (.warning, "Speaking too fast", "Try to slow down for clarity"),
-            (.tip, "Ask open questions", "Open-ended questions encourage dialogue"),
-            (.insight, "Good balance", "You're maintaining balanced talk time")
-        ]
-        
-        let random = mockCards.randomElement()!
-        let card = CoachCard(type: random.0, title: random.1, message: random.2)
-        coachCards.append(card)
-        
-        // Auto-dismiss after 8 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            coachCards.removeAll { $0.id == card.id }
-        }
-    }
 }
 
 #Preview {

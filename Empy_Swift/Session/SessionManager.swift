@@ -32,11 +32,18 @@ class SessionManager: ObservableObject {
     private let audioEngine: AudioEngine
     private let deepgramClient: DeepgramClient
     private let transcriptEngine: TranscriptEngine
+    private let conversationManager: ConversationManager
     private let logger: SessionLogger
+    
+    // Setup data (set by SetupView before recording starts)
+    var callType: String = ""
+    var participantContext: String = ""
     
     // Subscriptions
     private var deepgramCancellable: AnyCancellable?
     private var timerCancellable: AnyCancellable?
+    private var transcriptObserver: AnyCancellable?
+    private var lastForwardedCount = 0
     
     // Singleton
     static let shared = SessionManager()
@@ -52,6 +59,7 @@ class SessionManager: ObservableObject {
             deepgramClient: deepgramClient,
             logger: logger
         )
+        self.conversationManager = ConversationManager()
         self.logger = logger
         
         // Observe engine failures
@@ -94,7 +102,35 @@ class SessionManager: ObservableObject {
         // 3. Connect transcription after audio is flowing
         try transcriptEngine.startSession()
 
-        // 4. Update state
+        // 4. Start backend conversation
+        lastForwardedCount = 0
+        conversationManager.startConversation(
+            callType: callType,
+            participantContext: participantContext
+        )
+        
+        // 5. Forward final transcript segments to ConversationManager for API batching
+        transcriptObserver = transcriptEngine.$transcriptState
+            .receive(on: DispatchQueue.global(qos: .userInitiated))
+            .sink { [weak self] state in
+                guard let self = self else { return }
+                let finals = state.segments.filter { $0.isFinal }
+                guard finals.count > self.lastForwardedCount else { return }
+                
+                let newSegments = Array(finals.dropFirst(self.lastForwardedCount))
+                self.lastForwardedCount = finals.count
+                
+                for segment in newSegments {
+                    self.conversationManager.addSegment(
+                        text: segment.text,
+                        speaker: "me",
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
+                    )
+                }
+            }
+
+        // 6. Update state
         state = .recording
         sessionStartTime = Date()
         startTimer()
@@ -111,6 +147,10 @@ class SessionManager: ObservableObject {
         // Clear subscriptions
         deepgramCancellable?.cancel()
         timerCancellable?.cancel()
+        transcriptObserver?.cancel()
+        
+        // End backend conversation
+        conversationManager.endConversation()
         
         // Update state
         state = .stopped
@@ -138,6 +178,11 @@ class SessionManager: ObservableObject {
     /// Get transcript engine for UI observation
     var transcript: TranscriptEngine {
         return transcriptEngine
+    }
+    
+    /// Get conversation manager for UI observation
+    var conversation: ConversationManager {
+        return conversationManager
     }
     
     // MARK: - Private Helpers
