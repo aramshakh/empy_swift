@@ -74,32 +74,28 @@ struct RecordingView: View {
     
     /// Incrementally update messages (append finals, replace partial)
     private func updateTranscriptMessages(from segments: [TranscriptSegment]) {
-        // Separate finals and partials
-        let finals = segments.filter { $0.isFinal }
-        let partials = segments.filter { !$0.isFinal }
+        // Get existing final messages
+        let existingFinals = transcriptMessages.filter { $0.isFinal }
+        let existingFinalIds = Set(existingFinals.map { $0.id })
         
-        // Remove all partials from current messages
-        transcriptMessages.removeAll { !$0.isFinal }
+        // Build new array: existing finals + new finals + current partial
+        var newMessages = existingFinals
         
-        // Get existing final IDs
-        let existingFinalIds = Set(transcriptMessages.map { $0.id })
-        
-        // Append only NEW finals
-        for segment in finals {
-            if !existingFinalIds.contains(segment.id) {
-                let message = TranscriptMessage(
-                    id: segment.id,
-                    speaker: segment.speaker.flatMap { .participant(name: $0) } ?? .you,
-                    text: segment.text,
-                    timestamp: segment.timestamp,
-                    isFinal: true
-                )
-                transcriptMessages.append(message)
-            }
+        // Add NEW finals from segments
+        let newFinals = segments.filter { $0.isFinal && !existingFinalIds.contains($0.id) }
+        for segment in newFinals {
+            let message = TranscriptMessage(
+                id: segment.id,
+                speaker: segment.speaker.flatMap { .participant(name: $0) } ?? .you,
+                text: segment.text,
+                timestamp: segment.timestamp,
+                isFinal: true
+            )
+            newMessages.append(message)
         }
         
-        // Append current partial (if any)
-        if let partial = partials.first {
+        // Add current partial (if any)
+        if let partial = segments.first(where: { !$0.isFinal }) {
             let message = TranscriptMessage(
                 id: partial.id,
                 speaker: partial.speaker.flatMap { .participant(name: $0) } ?? .you,
@@ -107,8 +103,11 @@ struct RecordingView: View {
                 timestamp: partial.timestamp,
                 isFinal: false
             )
-            transcriptMessages.append(message)
+            newMessages.append(message)
         }
+        
+        // Replace array (SwiftUI sees the change)
+        transcriptMessages = newMessages
     }
     
     private func startRecording() {
