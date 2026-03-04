@@ -52,11 +52,6 @@ struct TranscriptView: View {
 
 struct TranscriptView_Previews: PreviewProvider {
     static var previews: some View {
-        // Create a preview engine with mock data
-        let mockEngine = TranscriptEngine(
-            deepgramClient: DeepgramClient(config: Config.live)
-        )
-        
-        return TranscriptView(transcriptEngine: mockEngine)
+        TranscriptView(transcriptEngine: TranscriptEngine.shared)
     }
 }
