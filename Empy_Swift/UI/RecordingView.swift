@@ -17,6 +17,7 @@ struct RecordingView: View {
     @State private var isPaused: Bool = false
     @State private var transcriptMessages: [TranscriptMessage] = []
     @State private var cancellables = Set<AnyCancellable>()
+    @State private var coachCards: [CoachCard] = []
     
     var body: some View {
         VStack(spacing: 0) {
@@ -34,9 +35,25 @@ struct RecordingView: View {
             controlBarView()
         }
         .navigationTitle("Recording")
+        .overlay(alignment: .topTrailing) {
+            VStack(spacing: EmpyDesign.Spacing.md) {
+                ForEach(coachCards) { card in
+                    CoachCardView(card: card) {
+                        coachCards.removeAll { $0.id == card.id }
+                    }
+                }
+            }
+            .frame(width: 350)
+            .padding(EmpyDesign.Spacing.lg)
+        }
         .onAppear {
             setupAudioPipeline()
             startRecording()
+            
+            // Test: show card after 3 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                addMockCoachCard()
+            }
         }
         .onDisappear {
             stopRecording()
@@ -193,6 +210,25 @@ struct RecordingView: View {
         .padding(EmpySpacing.md)
         .frame(maxWidth: .infinity)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+    
+    // MARK: - Mock Coach Cards (for testing)
+    
+    private func addMockCoachCard() {
+        let mockCards: [(CoachCardType, String, String)] = [
+            (.warning, "Speaking too fast", "Try to slow down for clarity"),
+            (.tip, "Ask open questions", "Open-ended questions encourage dialogue"),
+            (.insight, "Good balance", "You're maintaining balanced talk time")
+        ]
+        
+        let random = mockCards.randomElement()!
+        let card = CoachCard(type: random.0, title: random.1, message: random.2)
+        coachCards.append(card)
+        
+        // Auto-dismiss after 8 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            coachCards.removeAll { $0.id == card.id }
+        }
     }
 }
 
