@@ -11,9 +11,8 @@ import Combine
 
 struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
-    @StateObject private var audioEngine = AudioEngine()
-    @StateObject private var deepgramClient = DeepgramClient()
-    @StateObject private var transcriptEngine = TranscriptEngine()
+    @EnvironmentObject var sessionManager: SessionManager
+    @EnvironmentObject var transcriptEngine: TranscriptEngine
     @State private var isPaused: Bool = false
     @State private var transcriptMessages: [TranscriptMessage] = []
     @State private var cancellables = Set<AnyCancellable>()
@@ -47,7 +46,7 @@ struct RecordingView: View {
             .padding(EmpySpacing.lg)
         }
         .onAppear {
-            setupAudioPipeline()
+            setupObservers()
             startRecording()
             
             // Test: show card after 3 seconds
@@ -60,16 +59,10 @@ struct RecordingView: View {
         }
     }
     
-    // MARK: - Audio Pipeline Setup
+    // MARK: - Setup & Observers
     
-    private func setupAudioPipeline() {
-        // 1. AudioEngine → DeepgramClient
-        audioEngine.onChunk = { [weak deepgramClient] audioChunk in
-            deepgramClient?.send(audioData: audioChunk.data)
-        }
-        
-        // 2. TranscriptEngine observes DeepgramClient internally via delegate
-        // Just observe the published state:
+    private func setupObservers() {
+        // Observe transcript updates from shared TranscriptEngine
         transcriptEngine.$transcriptState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -88,11 +81,7 @@ struct RecordingView: View {
     private func startRecording() {
         Task {
             do {
-                // TranscriptEngine.startSession() connects Deepgram internally
-                transcriptEngine.startSession()
-                
-                // Start audio capture (handles permission internally)
-                try audioEngine.start()
+                try sessionManager.startRecording()
             } catch {
                 print("Failed to start recording: \(error)")
             }
@@ -100,8 +89,7 @@ struct RecordingView: View {
     }
     
     private func stopRecording() {
-        audioEngine.stop()
-        transcriptEngine.endSession()
+        sessionManager.stopRecording()
     }
     
     // MARK: - Talk Ratio Calculation
@@ -196,8 +184,12 @@ struct RecordingView: View {
             .controlSize(.large)
             
             Button {
+                if isPaused {
+                    try? sessionManager.resumeRecording()
+                } else {
+                    sessionManager.pauseRecording()
+                }
                 isPaused.toggle()
-                // TODO: implement pause functionality
             } label: {
                 HStack {
                     Image(systemName: isPaused ? "play.fill" : "pause.fill")
