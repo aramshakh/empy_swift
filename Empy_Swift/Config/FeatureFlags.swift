@@ -19,4 +19,12 @@ enum FeatureFlags {
     ///
     /// When enabled, activates real-time tension detection in conversations
     static let tensionDetectionEnabled: Bool = true
+    
+    /// Enable multilingual transcription (code-switching)
+    ///
+    /// When enabled, Deepgram uses `language=multi` for automatic
+    /// language detection and code-switching (e.g. English + Russian).
+    /// When disabled, no language param is sent (Deepgram auto-detects
+    /// from its general model).
+    static let multilingualEnabled: Bool = true
 }

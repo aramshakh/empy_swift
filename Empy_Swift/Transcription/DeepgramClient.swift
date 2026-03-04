@@ -22,7 +22,7 @@ protocol DeepgramClientDelegate: AnyObject {
 }
 
 /// WebSocket client for Deepgram live transcription
-class DeepgramClient {
+class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
     weak var delegate: DeepgramClientDelegate?
     
     // Dependencies
@@ -30,7 +30,7 @@ class DeepgramClient {
     
     // WebSocket state
     private var webSocketTask: URLSessionWebSocketTask?
-    private let session: URLSession
+    private var session: URLSession!
     private(set) var isConnected = false
     private var connectionStartTime: Date?
     
@@ -51,7 +51,36 @@ class DeepgramClient {
     
     init(logger: SessionLogger = .shared) {
         self.logger = logger
-        self.session = URLSession(configuration: .default)
+        super.init()
+        self.session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    }
+    
+    // MARK: - URLSessionWebSocketDelegate
+    
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        logger.log(event: "deepgram_ws_handshake_ok", layer: "transcription")
+        // Handshake succeeded — actual isConnected is set on first transcript
+    }
+    
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
+        logger.log(
+            event: "deepgram_ws_closed",
+            layer: "transcription",
+            details: ["code": "\(closeCode.rawValue)", "reason": reasonStr]
+        )
+        handleDisconnection()
+    }
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error {
+            logger.log(
+                event: "deepgram_ws_task_error",
+                layer: "transcription",
+                details: ["error": error.localizedDescription]
+            )
+            handleDisconnection()
+        }
     }
     
     // MARK: - Public API
@@ -62,12 +91,10 @@ class DeepgramClient {
             throw DeepgramClientError.missingAPIKey
         }
         
-        let apiKey = AppConfig.deepgramApiKey
-        
-        // Build WebSocket URL
+        // Build WebSocket URL (includes token query param for auth)
         let url = buildWebSocketURL()
         var request = URLRequest(url: url)
-        request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Token \(AppConfig.deepgramApiKey)", forHTTPHeaderField: "Authorization")
         
         // Create WebSocket task
         webSocketTask = session.webSocketTask(with: request)
@@ -128,15 +155,29 @@ class DeepgramClient {
     
     private func buildWebSocketURL() -> URL {
         var components = URLComponents(string: "wss://api.deepgram.com/v1/listen")!
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: "16000"),
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "interim_results", value: "true"),
-            URLQueryItem(name: "endpointing", value: "true"),
             URLQueryItem(name: "utterance_end_ms", value: "1000"),
-            URLQueryItem(name: "model", value: "nova-2")
+            // Pass API key as query param — URLSessionWebSocketTask can strip
+            // custom headers during the HTTP→WS upgrade handshake
+            URLQueryItem(name: "token", value: AppConfig.deepgramApiKey)
         ]
+        
+        if FeatureFlags.multilingualEnabled {
+            // Multi-language code-switching (e.g. English + Russian)
+            // Deepgram recommends endpointing=100 for code-switching
+            queryItems.append(URLQueryItem(name: "language", value: "multi"))
+            queryItems.append(URLQueryItem(name: "model", value: "nova-2"))
+            queryItems.append(URLQueryItem(name: "endpointing", value: "100"))
+        } else {
+            // Default: no language param, Deepgram auto-detects
+            queryItems.append(URLQueryItem(name: "endpointing", value: "true"))
+        }
+        
+        components.queryItems = queryItems
         return components.url!
     }
     
@@ -169,7 +210,7 @@ class DeepgramClient {
         case .string(let text):
             handleJSONMessage(text)
             
-        case .data(let data):
+        case .data(_):
             // Binary messages not expected from Deepgram
             logger.log(event: "deepgram_unexpected_binary", layer: "transcription")
             
