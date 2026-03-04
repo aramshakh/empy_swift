@@ -20,7 +20,7 @@ jobs:
       with:
         xcode-version: latest-stable
 
-- name: Show Xcode version
+    - name: Show Xcode version
       run: xcodebuild -version
       
     - name: List available schemes
