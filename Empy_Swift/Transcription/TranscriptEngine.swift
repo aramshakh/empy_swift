@@ -199,7 +199,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !trimmed.isEmpty else { return [] }
         
         // Simple sentence splitting on . ! ? followed by space or end
-        let pattern = "([.!?]+\s+|[.!?]+$)"
+        let pattern = "([.!?]+\\s+|[.!?]+$)"
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return [trimmed]
         }
