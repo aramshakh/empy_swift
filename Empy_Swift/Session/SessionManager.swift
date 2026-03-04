@@ -136,17 +136,17 @@ class SessionManager: ObservableObject {
         startTimer()
     }
     
-    /// Stop recording session
+    /// Stop recording session (fire-and-forget)
     func stopRecording() {
+        Task { await stopRecordingAndWait() }
+    }
+    
+    /// Stop recording session and wait for transcript flush to complete
+    func stopRecordingAndWait() async {
         logger.log(event: "session_stop", layer: "session")
         
-        // Stop components
+        // Stop audio immediately
         audioEngine.stop()
-        
-        // End transcription session async (waits for final transcripts)
-        Task {
-            await transcriptEngine.endSession()
-        }
         
         // Clear subscriptions
         deepgramCancellable?.cancel()
@@ -157,7 +157,11 @@ class SessionManager: ObservableObject {
         conversationManager.endConversation()
         
         // Update state
-        state = .stopped
+        await MainActor.run { state = .stopped }
+        
+        // Wait for Deepgram to flush final transcripts (500ms grace + partial flush)
+        await transcriptEngine.endSession()
+        
         logger.endSession()
     }
     

@@ -116,7 +116,11 @@ struct RecordingView: View {
     }
     
     private func stopRecording() {
-        sessionManager.stopRecording()
+        // Only fire if still actively recording (prevents double-stop when
+        // Stop button Task has already called stopRecordingAndWait)
+        if sessionManager.state == .recording || sessionManager.state == .paused {
+            sessionManager.stopRecording()
+        }
     }
     
     // MARK: - Sidebar
@@ -215,12 +219,18 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                sessionManager.stopRecording()
-                let finalTranscript = transcriptEngine.transcriptState.fullText
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                coordinator.endRecording(
-                    transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
-                )
+                // Stop audio immediately, then wait for async endSession
+                // (500ms grace + partial flush) before navigating
+                Task {
+                    await sessionManager.stopRecordingAndWait()
+                    let finalTranscript = transcriptEngine.transcriptState.fullText
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    await MainActor.run {
+                        coordinator.endRecording(
+                            transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
+                        )
+                    }
+                }
             } label: {
                 HStack {
                     Image(systemName: "stop.fill")

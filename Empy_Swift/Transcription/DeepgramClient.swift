@@ -173,8 +173,9 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             queryItems.append(URLQueryItem(name: "model", value: "nova-2"))
             queryItems.append(URLQueryItem(name: "endpointing", value: "100"))
         } else {
-            // Default: no language param, Deepgram auto-detects
-            queryItems.append(URLQueryItem(name: "endpointing", value: "true"))
+            // Default: no language param, Deepgram auto-detects English
+            // endpointing in ms — how long silence before Deepgram emits a final
+            queryItems.append(URLQueryItem(name: "endpointing", value: "300"))
         }
         
         components.queryItems = queryItems

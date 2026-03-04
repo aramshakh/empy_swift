@@ -63,29 +63,32 @@ class TranscriptEngine: ObservableObject {
         try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
         
         // Convert any pending partial to final before disconnecting
-        if let lastID = lastPartialID,
-           let partialSegment = partialSegments[lastID] {
-            // Remove partial
-            transcriptState.segments.removeAll { $0.id == lastID }
-            partialSegments.removeValue(forKey: lastID)
-            
-            // Add as final
-            let finalSegment = TranscriptSegment(
-                text: partialSegment.text,
-                speaker: partialSegment.speaker,
-                startTime: partialSegment.startTime,
-                endTime: partialSegment.endTime,
-                confidence: partialSegment.confidence,
-                isFinal: true
-            )
-            transcriptState.segments.append(finalSegment)
-            lastPartialID = nil
-            
-            logger.log(
-                event: "transcript_partial_finalized_on_stop",
-                layer: "transcript",
-                details: ["text": String(partialSegment.text.prefix(50))]
-            )
+        // Must happen on main thread since transcriptState is @Published
+        await MainActor.run {
+            if let lastID = lastPartialID,
+               let partialSegment = partialSegments[lastID] {
+                // Remove partial
+                transcriptState.segments.removeAll { $0.id == lastID }
+                partialSegments.removeValue(forKey: lastID)
+                
+                // Add as final
+                let finalSegment = TranscriptSegment(
+                    text: partialSegment.text,
+                    speaker: partialSegment.speaker,
+                    startTime: partialSegment.startTime,
+                    endTime: partialSegment.endTime,
+                    confidence: partialSegment.confidence,
+                    isFinal: true
+                )
+                transcriptState.segments.append(finalSegment)
+                lastPartialID = nil
+                
+                logger.log(
+                    event: "transcript_partial_finalized_on_stop",
+                    layer: "transcript",
+                    details: ["text": String(partialSegment.text.prefix(50))]
+                )
+            }
         }
         
         deepgramClient.disconnect()
