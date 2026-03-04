@@ -65,8 +65,8 @@ struct RecordingView: View {
         // Observe transcript updates from shared TranscriptEngine
         transcriptEngine.$transcriptState
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                self?.transcriptMessages = state.segments.map { segment in
+            .sink { state in
+                transcriptMessages = state.segments.map { segment in
                     TranscriptMessage(
                         speaker: .you,
                         text: segment.text,
@@ -99,7 +99,7 @@ struct RecordingView: View {
         guard !messages.isEmpty else { return 0.5 }
         
         let userWords = messages
-            .filter { $0.speaker == .you }
+            .filter { $0.speaker == "you" }
             .reduce(0) { $0 + $1.text.split(separator: " ").count }
         
         let totalWords = messages
