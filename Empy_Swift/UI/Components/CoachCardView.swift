@@ -7,7 +7,7 @@ struct CoachCardView: View {
     @State private var isVisible = true
     
     var body: some View {
-        HStack(alignment: .top, spacing: EmpyDesign.Spacing.md) {
+        HStack(alignment: .top, spacing: EmpySpacing.md) {
             // Icon
             Image(systemName: card.type.icon)
                 .foregroundColor(card.type.color)
@@ -17,11 +17,11 @@ struct CoachCardView: View {
             // Content
             VStack(alignment: .leading, spacing: 4) {
                 Text(card.title)
-                    .font(EmpyDesign.Typography.label)
+                    .font(.empyLabel)
                     .fontWeight(.semibold)
                 
                 Text(card.message)
-                    .font(EmpyDesign.Typography.caption)
+                    .font(.empyCaption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -43,9 +43,9 @@ struct CoachCardView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(EmpyDesign.Spacing.md)
+        .padding(EmpySpacing.md)
         .background(
-            RoundedRectangle(cornerRadius: EmpyDesign.BorderRadius.lg)
+            RoundedRectangle(cornerRadius: EmpyRadius.lg)
                 .fill(Color(nsColor: .controlBackgroundColor))
                 .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 2)
         )
