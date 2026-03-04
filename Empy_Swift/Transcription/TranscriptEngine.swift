@@ -41,9 +41,9 @@ class TranscriptEngine: ObservableObject {
     // MARK: - Public API
     
     /// Start transcription session
-    func startSession() {
+    func startSession() throws {
         clearState()
-        
+
         do {
             try deepgramClient.connect()
             logger.log(event: "transcription_session_started", layer: "transcript")
@@ -53,6 +53,7 @@ class TranscriptEngine: ObservableObject {
                 layer: "transcript",
                 details: ["error": error.localizedDescription]
             )
+            throw error
         }
     }
     

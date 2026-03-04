@@ -36,7 +36,7 @@ class DeepgramClient {
     
     // Reconnection management
     private var reconnectionStrategy = ReconnectionStrategy()
-    private var reconnectTimer: Timer?
+    private var reconnectWorkItem: DispatchWorkItem?
     private var manualDisconnect = false
     
     // Audio buffering during disconnect
@@ -76,8 +76,8 @@ class DeepgramClient {
         webSocketTask?.resume()
         startReceiving()
 
-        isConnected = true
-        connectionStartTime = Date()
+        isConnected = false
+        connectionStartTime = nil
         
         logger.log(event: "deepgram_connecting", layer: "transcription")
         
@@ -111,13 +111,15 @@ class DeepgramClient {
         // Send as binary frame
         let message = URLSessionWebSocketTask.Message.data(audioData)
         task.send(message) { [weak self] error in
+            guard let self = self else { return }
+            guard task === self.webSocketTask else { return }
             if let error = error {
-                self?.logger.log(
+                self.logger.log(
                     event: "deepgram_send_failed",
                     layer: "transcription",
                     details: ["error": error.localizedDescription]
                 )
-                self?.handleDisconnection()
+                self.handleDisconnection()
             }
         }
     }
@@ -137,16 +139,19 @@ class DeepgramClient {
         return components.url!
     }
     
-    private func startReceiving() {
-        webSocketTask?.receive { [weak self] result in
+    private func startReceiving(task: URLSessionWebSocketTask? = nil) {
+        let activeTask = task ?? webSocketTask
+        guard let activeTask = activeTask else { return }
+
+        activeTask.receive { [weak self] result in
             guard let self = self else { return }
-            
+            guard activeTask === self.webSocketTask else { return }
+
             switch result {
             case .success(let message):
                 self.handleReceivedMessage(message)
-                // Continue receiving
-                self.startReceiving()
-                
+                self.startReceiving(task: activeTask)
+
             case .failure(let error):
                 self.logger.log(
                     event: "deepgram_receive_error",
@@ -204,10 +209,14 @@ class DeepgramClient {
         guard !transcript.isEmpty else { return }
         
         // First successful transcript confirms stream is healthy
-        reconnectionStrategy.reset()
-        stopDegradationTimer()
-        flushAudioBuffer()
-        delegate?.deepgramClientDidConnect(self)
+        if !isConnected {
+            isConnected = true
+            connectionStartTime = Date()
+            reconnectionStrategy.reset()
+            stopDegradationTimer()
+            flushAudioBuffer()
+            delegate?.deepgramClientDidConnect(self)
+        }
         
         // Emit partial or final transcript
         if result.isFinal == true || result.speechFinal == true {
@@ -259,6 +268,7 @@ class DeepgramClient {
         guard !manualDisconnect else { return }
         
         isConnected = false
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         delegate?.deepgramClientDidDisconnect(self)
         
@@ -275,20 +285,19 @@ class DeepgramClient {
     
     private func attemptReconnect() {
         guard let delay = reconnectionStrategy.nextDelay() else {
-            // Max attempts exceeded
             logger.log(event: "deepgram_reconnect_exhausted", layer: "transcription")
             emitDegradation()
             return
         }
-        
+
         logger.log(
             event: "deepgram_reconnect_scheduled",
             layer: "transcription",
             details: ["delay": String(format: "%.1fs", delay), "attempt": "\(reconnectionStrategy.attempt)"]
         )
-        
+
         stopReconnectTimer()
-        reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+        let workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             do {
                 try self.connect()
@@ -298,14 +307,16 @@ class DeepgramClient {
                     layer: "transcription",
                     details: ["error": error.localizedDescription]
                 )
-                self.attemptReconnect() // Try again
+                self.attemptReconnect()
             }
         }
+        reconnectWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
-    
+
     private func stopReconnectTimer() {
-        reconnectTimer?.invalidate()
-        reconnectTimer = nil
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
     }
     
     // MARK: - Audio Buffering

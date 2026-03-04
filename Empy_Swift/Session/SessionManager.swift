@@ -88,12 +88,12 @@ class SessionManager: ObservableObject {
             self?.deepgramClient.send(audioData: chunk.pcmData)
         }
         
-        // 2. Start TranscriptEngine (connects Deepgram)
-        transcriptEngine.startSession()
-        
-        // 3. Start audio capture
+        // 2. Start audio capture first
         try audioEngine.start()
-        
+
+        // 3. Connect transcription after audio is flowing
+        try transcriptEngine.startSession()
+
         // 4. Update state
         state = .recording
         sessionStartTime = Date()
