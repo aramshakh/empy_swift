@@ -36,15 +36,32 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           -quiet
       
-    - name: Run Tests
+    - name: Run Tests (if configured)
       run: |
+        set +e
         xcodebuild test \
           -project Empy_Swift.xcodeproj \
           -scheme Empy_Swift \
           -destination 'platform=macOS' \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          -quiet
+          -quiet > /tmp/xcode-test.log 2>&1
+        status=$?
+        set -e
+
+        if [ $status -eq 0 ]; then
+          echo "✅ Tests passed"
+          exit 0
+        fi
+
+        if grep -q "not currently configured for the test action" /tmp/xcode-test.log; then
+          echo "⚠️ No test action configured for Empy_Swift scheme; skipping tests for now"
+          exit 0
+        fi
+
+        echo "❌ Tests failed"
+        tail -200 /tmp/xcode-test.log
+        exit $status
       
     - name: SwiftLint
       run: |
