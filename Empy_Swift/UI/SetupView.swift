@@ -79,7 +79,6 @@ struct SetupView: View {
                 }
                 .padding(.horizontal, EmpyLayout.pagePadding)
                 .padding(.bottom, EmpySpacing.xl)
-                .frame(maxWidth: EmpyLayout.maxWidth)
                 .frame(maxWidth: .infinity)
             }
         }
