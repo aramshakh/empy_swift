@@ -36,7 +36,7 @@ struct RecordingView: View {
         }
         .navigationTitle("Recording")
         .overlay(alignment: .topTrailing) {
-            VStack(spacing: EmpyDesign.Spacing.md) {
+            VStack(spacing: EmpySpacing.md) {
                 ForEach(coachCards) { card in
                     CoachCardView(card: card) {
                         coachCards.removeAll { $0.id == card.id }
@@ -44,7 +44,7 @@ struct RecordingView: View {
                 }
             }
             .frame(width: 350)
-            .padding(EmpyDesign.Spacing.lg)
+            .padding(EmpySpacing.lg)
         }
         .onAppear {
             setupAudioPipeline()
