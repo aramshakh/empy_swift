@@ -47,11 +47,3 @@ struct TranscriptView: View {
         .background(Color(NSColor.textBackgroundColor))
     }
 }
-
-// MARK: - Preview
-
-struct TranscriptView_Previews: PreviewProvider {
-    static var previews: some View {
-        TranscriptView(transcriptEngine: TranscriptEngine.shared)
-    }
-}
