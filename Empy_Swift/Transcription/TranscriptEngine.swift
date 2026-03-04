@@ -166,14 +166,18 @@ extension TranscriptEngine: DeepgramClientDelegate {
             lastPartialID = nil
         }
         
-        // Add final segment
-        let segment = TranscriptSegment(
-            text: transcript,
-            confidence: 1.0, // Finals are high confidence
-            isFinal: true
-        )
+        // Split transcript into sentences for chat-like display
+        let sentences = splitIntoSentences(transcript)
         
-        transcriptState.segments.append(segment)
+        for sentence in sentences {
+            let segment = TranscriptSegment(
+                text: sentence,
+                confidence: 1.0,
+                isFinal: true
+            )
+            transcriptState.segments.append(segment)
+        }
+        
         lastFinalTimestamp = Date()
         
         let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
@@ -183,9 +187,54 @@ extension TranscriptEngine: DeepgramClientDelegate {
             details: [
                 "text": String(transcript.prefix(50)),
                 "word_count": "\(wordCount)",
+                "sentences": "\(sentences.count)",
                 "total_words": "\(transcriptState.wordCount)"
             ]
         )
+    }
+    
+    /// Split text into sentences for better chat-like display
+    private func splitIntoSentences(_ text: String) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        
+        // Simple sentence splitting on . ! ? followed by space or end
+        let pattern = "([.!?]+\s+|[.!?]+$)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return [trimmed]
+        }
+        
+        let nsString = trimmed as NSString
+        let matches = regex.matches(in: trimmed, range: NSRange(location: 0, length: nsString.length))
+        
+        guard !matches.isEmpty else {
+            // No sentence boundaries found, return as single sentence
+            return [trimmed]
+        }
+        
+        var sentences: [String] = []
+        var lastEnd = 0
+        
+        for match in matches {
+            let sentenceRange = NSRange(location: lastEnd, length: match.range.location + match.range.length - lastEnd)
+            let sentence = nsString.substring(with: sentenceRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sentence.isEmpty {
+                sentences.append(sentence)
+            }
+            lastEnd = match.range.location + match.range.length
+        }
+        
+        // Add remaining text if any
+        if lastEnd < nsString.length {
+            let remaining = nsString.substring(from: lastEnd)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !remaining.isEmpty {
+                sentences.append(remaining)
+            }
+        }
+        
+        return sentences.isEmpty ? [trimmed] : sentences
     }
     
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error) {
