@@ -73,8 +73,11 @@ class DeepgramClient {
         webSocketTask = session.webSocketTask(with: request)
         
         manualDisconnect = false
-        startReceiving()
         webSocketTask?.resume()
+        startReceiving()
+
+        isConnected = true
+        connectionStartTime = Date()
         
         logger.log(event: "deepgram_connecting", layer: "transcription")
         
@@ -99,7 +102,7 @@ class DeepgramClient {
     
     /// Send audio data to Deepgram
     func send(audioData: Data) {
-        guard isConnected, let task = webSocketTask else {
+        guard let task = webSocketTask else {
             // Buffer audio if disconnected
             bufferAudio(audioData)
             return
@@ -200,15 +203,11 @@ class DeepgramClient {
         let transcript = alternative.transcript
         guard !transcript.isEmpty else { return }
         
-        // Mark as connected on first successful transcript
-        if !isConnected {
-            isConnected = true
-            connectionStartTime = Date()
-            reconnectionStrategy.reset()
-            stopDegradationTimer()
-            flushAudioBuffer()
-            delegate?.deepgramClientDidConnect(self)
-        }
+        // First successful transcript confirms stream is healthy
+        reconnectionStrategy.reset()
+        stopDegradationTimer()
+        flushAudioBuffer()
+        delegate?.deepgramClientDidConnect(self)
         
         // Emit partial or final transcript
         if result.isFinal == true || result.speechFinal == true {

@@ -78,6 +78,9 @@ class SessionManager: ObservableObject {
     
     /// Start recording session
     func startRecording() throws {
+        if logger.currentSession() == nil {
+            logger.startSession(id: UUID().uuidString)
+        }
         logger.log(event: "session_start", layer: "session")
         
         // 1. Wire AudioEngine → DeepgramClient
@@ -111,6 +114,7 @@ class SessionManager: ObservableObject {
         
         // Update state
         state = .stopped
+        logger.endSession()
     }
     
     /// Pause recording
