@@ -69,6 +69,26 @@ final class AudioDeviceManager: ObservableObject {
         return (inputDevices + outputDevices).first { $0.uid == uid }
     }
 
+    /// Set the macOS system default output device.
+    /// SCKit captures audio routed to the default output, so this affects which device's audio is captured.
+    func setSystemDefaultOutputDevice(_ device: AudioDevice) throws {
+        var deviceID = device.id
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address, 0, nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size),
+            &deviceID
+        )
+        guard status == noErr else {
+            throw AudioDeviceError.failedToSetDevice(status)
+        }
+    }
+
     /// The current system default input device ID.
     var systemDefaultInputID: AudioDeviceID {
         var deviceID: AudioDeviceID = kAudioObjectUnknown
