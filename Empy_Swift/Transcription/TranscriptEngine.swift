@@ -170,6 +170,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Show confirmedText + in-progress fragment — does NOT advance confirmedText
             self.applyPartial(transcript)
         }
     }
@@ -178,6 +179,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Deepgram confirmed this chunk — append to confirmedText, bubble stays open
             self.applyFinal(transcript)
         }
     }
@@ -186,6 +188,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Last confirmed chunk before a pause — append, bubble stays open
             self.applyFinal(transcript)
         }
     }
@@ -193,6 +196,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // 1200ms silence = end of sentence → seal, next speech opens fresh bubble
             self.sealActiveBubble()
         }
     }

@@ -255,6 +255,8 @@ class AudioEngine: ObservableObject {
 extension AudioEngine: DeviceMonitorDelegate {
     func deviceDidDisconnect() {
         logger.log(event: "mic_disconnected", layer: "audio")
+        
+        // Stop recording gracefully (no crash)
         if isCapturing {
             stop()
         }
@@ -262,32 +264,16 @@ extension AudioEngine: DeviceMonitorDelegate {
     
     func deviceDidReconnect() {
         logger.log(event: "mic_reconnected", layer: "audio")
+        
+        // Auto-restart recording
         do {
             try start()
         } catch {
-            logger.log(event: "restart_failed_on_reconnect", layer: "audio",
-                       details: ["error": error.localizedDescription])
-        }
-    }
-    
-    /// Called when the audio device changed (user switched mic) while engine was running.
-    /// Must tear down the old tap and reinstall on the new device.
-    func deviceDidChange() {
-        logger.log(event: "mic_device_changed", layer: "audio")
-        guard isCapturing else { return }
-        
-        // Stop engine and remove tap from old device
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        chunkEmitter = nil
-        
-        // Re-setup on new device
-        do {
-            try setupEngine()
-            logger.log(event: "engine_restarted_after_device_change", layer: "audio")
-        } catch {
-            logger.log(event: "restart_failed_after_device_change", layer: "audio",
-                       details: ["error": error.localizedDescription])
+            logger.log(
+                event: "restart_failed_on_reconnect",
+                layer: "audio",
+                details: ["error": error.localizedDescription]
+            )
         }
     }
 }

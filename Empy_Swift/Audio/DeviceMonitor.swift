@@ -12,8 +12,6 @@ import AVFoundation
 protocol DeviceMonitorDelegate: AnyObject {
     func deviceDidDisconnect()
     func deviceDidReconnect()
-    /// Called when the active audio device changed while engine was running
-    func deviceDidChange()
 }
 
 /// Monitors audio device changes and handles disconnect/reconnect events
@@ -65,17 +63,14 @@ class DeviceMonitor {
         logger.log(event: "device_monitoring_stopped", layer: "audio")
     }
     
-    /// Handle audio engine configuration changes.
-    ///
-    /// Three cases:
-    ///   1. Device disconnected: engine was running → now stopped (no input)
-    ///   2. Device reconnected: engine was stopped → now channels > 0
-    ///   3. Device switched: engine still running but hardware changed → must reinstall tap
+    /// Handle audio engine configuration changes
+    /// Detects disconnect (engine stops) vs reconnect (device available again)
     private func handleConfigurationChange(_ notification: Notification) {
         guard let engine = engine else { return }
         
         let isCurrentlyRunning = engine.isRunning
-        let format = engine.inputNode.outputFormat(forBus: 0)
+        let inputNode = engine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
         
         logger.log(
             event: "audio_config_changed",
@@ -88,20 +83,19 @@ class DeviceMonitor {
             ]
         )
         
-        if wasRunning && !isCurrentlyRunning && format.channelCount == 0 {
-            // Device physically disconnected — no input available
+        // Detect disconnect: engine was running, now stopped
+        if wasRunning && !isCurrentlyRunning {
+            logger.log(event: "mic_disconnected", layer: "audio")
             wasRunning = false
             delegate?.deviceDidDisconnect()
-        } else if !wasRunning && format.channelCount > 0 {
-            // Device reconnected after disconnect
-            wasRunning = isCurrentlyRunning
+        }
+        // Detect reconnect: engine was stopped, device is now available
+        else if !wasRunning && format.channelCount > 0 {
+            logger.log(event: "mic_reconnected", layer: "audio")
             delegate?.deviceDidReconnect()
-        } else if wasRunning {
-            // Engine still running but configuration changed = device switch
-            // (e.g. AirPods ↔ built-in mic, USB mic plugged in)
-            delegate?.deviceDidChange()
         }
         
+        // Update state for next comparison
         wasRunning = isCurrentlyRunning
     }
 }
