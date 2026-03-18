@@ -97,7 +97,10 @@ class SystemAudioCapture: NSObject {
         let content = try await SCShareableContent.current
         
         // Filter: desktop-wide audio (no specific window)
-        let filter = SCContentFilter(desktopIndependentWindow: content.windows.first)
+        guard let firstWindow = content.windows.first else {
+            throw SystemAudioError.noWindowsAvailable
+        }
+        let filter = SCContentFilter(desktopIndependentWindow: firstWindow)
         
         // Configure stream
         let config = SCStreamConfiguration()
@@ -117,7 +120,7 @@ class SystemAudioCapture: NSObject {
         // Add audio output handler
         try stream.addStreamOutput(
             self,
-            type: .audio,
+            type: SCStreamOutputType.audio,
             sampleHandlerQueue: DispatchQueue(
                 label: "com.empy.systemAudio",
                 qos: .userInitiated
@@ -167,7 +170,8 @@ class SystemAudioCapture: NSObject {
         }
         
         // Create AVAudioFormat from ASBD
-        guard let format = AVAudioFormat(streamDescription: &asbd.mutable) else {
+        var mutableAsbd = asbd
+        guard let format = AVAudioFormat(streamDescription: &mutableAsbd) else {
             print("⚠️ Failed to create AVAudioFormat")
             return nil
         }
@@ -251,10 +255,20 @@ extension SystemAudioCapture: SCStreamOutput {
     }
 }
 
-// MARK: - Helper Extension
-private extension AudioStreamBasicDescription {
-    var mutable: AudioStreamBasicDescription {
-        var copy = self
-        return copy
+// MARK: - Error Types
+enum SystemAudioError: LocalizedError {
+    case noWindowsAvailable
+    case permissionDenied
+    case streamCreationFailed
+    
+    var errorDescription: String? {
+        switch self {
+        case .noWindowsAvailable:
+            return "No windows available for screen capture"
+        case .permissionDenied:
+            return "Screen recording permission denied"
+        case .streamCreationFailed:
+            return "Failed to create screen capture stream"
+        }
     }
 }
