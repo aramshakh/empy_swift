@@ -90,14 +90,23 @@ class SystemAudioCapture: NSObject {
             ]
         )
         
-        // Create content filter (capture all system audio)
-        let content = try await SCShareableContent.current
+        // Create content filter: capture ALL audio from the main display.
+        // Using desktopIndependentWindow was wrong — it only captures audio from
+        // one specific window. The display-level filter captures all system audio.
+        let content = try await SCShareableContent.excludingDesktopWindows(false,
+                                                                           onScreenWindowsOnly: false)
         
-        // Filter: desktop-wide audio (no specific window)
-        guard let firstWindow = content.windows.first else {
-            throw SystemAudioError.noWindowsAvailable
+        guard let display = content.displays.first else {
+            throw SystemAudioError.noDisplayAvailable
         }
-        let filter = SCContentFilter(desktopIndependentWindow: firstWindow)
+        
+        // Exclude current app (prevent feedback), include all other applications.
+        let excludedApps = content.applications.filter {
+            $0.bundleIdentifier == Bundle.main.bundleIdentifier
+        }
+        let filter = SCContentFilter(display: display,
+                                     excludingApplications: excludedApps,
+                                     exceptingWindows: [])
         
         // Configure stream
         let config = SCStreamConfiguration()
@@ -152,74 +161,27 @@ class SystemAudioCapture: NSObject {
         }
     }
     
-    /// Convert CMSampleBuffer to AVAudioPCMBuffer
+    /// Convert CMSampleBuffer to AVAudioPCMBuffer using Apple's recommended approach.
+    ///
+    /// Uses `withAudioBufferList` + `AVAudioPCMBuffer(pcmFormat:bufferListNoCopy:)`
+    /// which correctly handles non-interleaved multi-channel audio from SCKit.
     private func createPCMBuffer(from sampleBuffer: CMSampleBuffer) -> AVAudioPCMBuffer? {
-        // Get audio format description
-        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else {
-            print("⚠️ No format description in sample buffer")
-            return nil
+        var result: AVAudioPCMBuffer?
+        do {
+            try sampleBuffer.withAudioBufferList { audioBufferList, blockBuffer in
+                guard
+                    let description = sampleBuffer.formatDescription?.audioStreamBasicDescription,
+                    let format = AVAudioFormat(standardFormatWithSampleRate: description.mSampleRate,
+                                              channels: description.mChannelsPerFrame),
+                    let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format,
+                                                    bufferListNoCopy: audioBufferList.unsafePointer)
+                else { return }
+                result = pcmBuffer
+            }
+        } catch {
+            // Sample buffer audio extraction failed — not fatal, just skip this buffer
         }
-        
-        // Get audio stream basic description
-        guard let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else {
-            print("⚠️ No stream basic description")
-            return nil
-        }
-        
-        // Create AVAudioFormat from ASBD
-        var mutableAsbd = asbd
-        guard let format = AVAudioFormat(streamDescription: &mutableAsbd) else {
-            print("⚠️ Failed to create AVAudioFormat")
-            return nil
-        }
-        
-        // Get block buffer containing audio data
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
-            print("⚠️ No data buffer in sample buffer")
-            return nil
-        }
-        
-        // Get data pointer
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        var lengthAtOffset: Int = 0
-        var totalLength: Int = 0
-        
-        let status = CMBlockBufferGetDataPointer(
-            blockBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: &lengthAtOffset,
-            totalLengthOut: &totalLength,
-            dataPointerOut: &dataPointer
-        )
-        
-        guard status == kCMBlockBufferNoErr, let pointer = dataPointer else {
-            print("⚠️ Failed to get data pointer: \(status)")
-            return nil
-        }
-        
-        // Calculate frame count
-        let bytesPerFrame = UInt32(format.streamDescription.pointee.mBytesPerFrame)
-        guard bytesPerFrame > 0 else {
-            print("⚠️ Invalid bytes per frame: \(bytesPerFrame)")
-            return nil
-        }
-        
-        let frameCount = AVAudioFrameCount(lengthAtOffset) / bytesPerFrame
-        
-        // Create PCM buffer
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            print("⚠️ Failed to create PCM buffer")
-            return nil
-        }
-        
-        buffer.frameLength = frameCount
-        
-        // Copy audio data
-        if let bufferData = buffer.audioBufferList.pointee.mBuffers.mData {
-            memcpy(bufferData, pointer, lengthAtOffset)
-        }
-        
-        return buffer
+        return result
     }
 }
 
@@ -254,14 +216,14 @@ extension SystemAudioCapture: SCStreamOutput {
 
 // MARK: - Error Types
 enum SystemAudioError: LocalizedError {
-    case noWindowsAvailable
+    case noDisplayAvailable
     case permissionDenied
     case streamCreationFailed
     
     var errorDescription: String? {
         switch self {
-        case .noWindowsAvailable:
-            return "No windows available for screen capture"
+        case .noDisplayAvailable:
+            return "No display available for system audio capture"
         case .permissionDenied:
             return "Screen recording permission denied"
         case .streamCreationFailed:
