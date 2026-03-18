@@ -85,17 +85,11 @@ class SessionManager: ObservableObject {
         logger.log(event: "session_start", layer: "session")
         
         // 1. Wire DualStreamManager → DeepgramClient
-        // Microphone stream
+        // Microphone stream only — system audio uses a separate Deepgram
+        // session with different params (48kHz stereo) and is not yet wired.
+        // Sending system audio into the mic stream (16kHz mono) breaks transcription.
         dualStreamManager.onMicChunk = { [weak self] chunk in
             self?.deepgramClient.send(audioData: chunk.pcmData)
-        }
-        
-        // System audio stream
-        dualStreamManager.onSystemBuffer = { [weak self] buffer in
-            // Convert Float32 buffer to Data
-            if let pcmData = self?.convertBufferToData(buffer) {
-                self?.deepgramClient.send(audioData: pcmData)
-            }
         }
         
         // 2. Start dual audio capture (async)
@@ -183,33 +177,6 @@ class SessionManager: ObservableObject {
     }
     
     // MARK: - Private Helpers
-    
-    /// Convert AVAudioPCMBuffer to PCM Data
-    private func convertBufferToData(_ buffer: AVAudioPCMBuffer) -> Data? {
-        guard let channelData = buffer.floatChannelData else {
-            return nil
-        }
-        
-        let frameLength = Int(buffer.frameLength)
-        let channelCount = Int(buffer.format.channelCount)
-        
-        // Convert Float32 to Int16 PCM
-        var int16Data = [Int16]()
-        int16Data.reserveCapacity(frameLength * channelCount)
-        
-        for frame in 0..<frameLength {
-            for channel in 0..<channelCount {
-                let sample = channelData[channel][frame]
-                // Clamp and convert to Int16
-                let clampedSample = max(-1.0, min(1.0, sample))
-                let int16Sample = Int16(clampedSample * Float(Int16.max))
-                int16Data.append(int16Sample)
-            }
-        }
-        
-        // Convert to Data
-        return int16Data.withUnsafeBytes { Data($0) }
-    }
     
     private func startTimer() {
         timerCancellable = Timer.publish(every: 0.1, on: .main, in: .common)
