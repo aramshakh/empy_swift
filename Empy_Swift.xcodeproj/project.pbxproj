@@ -10,22 +10,9 @@
 		08BA5D612F51D1A400B5DF84 /* Empy_Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Empy_Swift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		08BA5D702F51D5CB00B5DF84 /* Exceptions for "Empy_Swift" folder in "Empy_Swift" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"Empy-Swift-Info.plist",
-			);
-			target = 08BA5D602F51D1A400B5DF84 /* Empy_Swift */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		08BA5D632F51D1A400B5DF84 /* Empy_Swift */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				08BA5D702F51D5CB00B5DF84 /* Exceptions for "Empy_Swift" folder in "Empy_Swift" target */,
-			);
 			path = Empy_Swift;
 			sourceTree = "<group>";
 		};
@@ -261,12 +248,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Empy_Swift/Empy_Swift.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6PAFH86CN4;
 				ENABLE_APP_SANDBOX = YES;
-				CODE_SIGN_ENTITLEMENTS = Empy_Swift/Empy_Swift.entitlements;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -298,12 +285,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Empy_Swift/Empy_Swift.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6PAFH86CN4;
 				ENABLE_APP_SANDBOX = YES;
-				CODE_SIGN_ENTITLEMENTS = Empy_Swift/Empy_Swift.entitlements;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;

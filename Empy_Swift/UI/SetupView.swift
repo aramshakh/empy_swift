@@ -67,6 +67,9 @@ struct SetupView: View {
                             // Participant context
                             participantContextSection
                             
+                            // Audio device settings
+                            audioDevicesSection
+
                             // How it works
                             howItWorksSection
                             
@@ -195,6 +198,22 @@ struct SetupView: View {
         }
     }
     
+    // MARK: - Audio Device Settings Section
+
+    private var audioDevicesSection: some View {
+        DisclosureGroup {
+            AudioSettingsView()
+                .padding(.top, EmpySpacing.xs)
+        } label: {
+            HStack(spacing: EmpySpacing.xs) {
+                Image(systemName: "mic.badge.plus")
+                Text("Audio Settings")
+                    .font(.empyLabel)
+                    .foregroundColor(colorScheme == .dark ? .empyForegroundDark : .empyForegroundLight)
+            }
+        }
+    }
+
     // MARK: - How It Works Section
     
     private var howItWorksSection: some View {

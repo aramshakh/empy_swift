@@ -80,6 +80,17 @@ class SessionManager: ObservableObject {
             }
         }
 
+        // Apply preferred input device (resolved from persisted UID)
+        let preferredUID = UserDefaults.standard.string(forKey: "preferredInputDeviceUID") ?? ""
+        if !preferredUID.isEmpty,
+           let device = AudioDeviceManager.shared.resolveDevice(uid: preferredUID) {
+            dualStreamManager.setPreferredInputDevice(device)
+            logger.log(event: "preferred_input_device_applied", layer: "session",
+                       details: ["device": device.name])
+        } else {
+            dualStreamManager.setPreferredInputDevice(nil)
+        }
+
         // 1. Start mic synchronously
         do {
             try dualStreamManager.startMicOnly()

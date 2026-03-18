@@ -7,6 +7,7 @@
 //
 
 import AVFoundation
+import AudioToolbox
 import Combine
 
 extension Notification.Name {
@@ -36,6 +37,10 @@ class AudioEngine: ObservableObject {
     /// Session logger for event tracking
     private let logger: SessionLogger
     
+    /// Preferred input device set by the user. Applied in setupEngine() after engine.start().
+    /// If nil, AVAudioEngine uses the system default input.
+    var preferredInputDevice: AudioDevice?
+
     /// Audio format: 16kHz, mono, Int16 PCM
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
@@ -119,8 +124,21 @@ class AudioEngine: ObservableObject {
         
         // Start the engine FIRST so inputNode reflects the real hardware format
         try engine.start()
-        
-        // Read the actual hardware format AFTER engine start
+
+        // Apply preferred input device (if set) after engine has started
+        if let preferred = preferredInputDevice {
+            do {
+                try AudioDeviceManager.shared.setInputDevice(preferred, on: engine)
+                logger.log(event: "input_device_applied", layer: "audio",
+                           details: ["device": preferred.name, "uid": preferred.uid])
+            } catch {
+                // Non-fatal — fall back to system default
+                logger.log(event: "input_device_apply_failed", layer: "audio",
+                           details: ["error": error.localizedDescription])
+            }
+        }
+
+        // Read the actual hardware format AFTER engine start (and device assignment)
         let inputFormat = inputNode.outputFormat(forBus: 0)
         
         logger.log(

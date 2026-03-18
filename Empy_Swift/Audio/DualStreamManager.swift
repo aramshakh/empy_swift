@@ -56,6 +56,11 @@ class DualStreamManager: ObservableObject {
             .assign(to: &$isMicCapturing)
     }
     
+    /// Set the preferred input device. Must be called before startMicOnly().
+    func setPreferredInputDevice(_ device: AudioDevice?) {
+        audioEngine.preferredInputDevice = device
+    }
+
     /// Start microphone only (synchronous, fast path).
     /// Call this first so Deepgram can connect immediately.
     /// - Throws: Permission or AVAudioEngine errors
