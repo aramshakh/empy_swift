@@ -14,12 +14,13 @@ extension Notification.Name {
 
 /// Delegate protocol for Deepgram transcription events
 protocol DeepgramClientDelegate: AnyObject {
-    /// Deepgram interim result — text still being refined
-    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String)
+    /// Deepgram interim result — text still being refined.
+    /// `speaker` is non-nil only when the client has a `speakerResolver` configured.
+    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String, speaker: String?)
     /// Deepgram isFinal=true — text confirmed for this utterance chunk
-    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String)
+    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String, speaker: String?)
     /// Deepgram speechFinal=true — speaker paused, utterance complete → seal bubble
-    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal transcript: String)
+    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal transcript: String, speaker: String?)
     /// Deepgram UtteranceEnd event — 1200ms silence detected → seal bubble
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient)
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error)
@@ -30,7 +31,18 @@ protocol DeepgramClientDelegate: AnyObject {
 /// WebSocket client for Deepgram live transcription
 class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
     weak var delegate: DeepgramClientDelegate?
-    
+
+    /// Optional closure that maps a Deepgram speaker ID (0, 1, 2…) to a display label.
+    /// When nil, the client fires delegate methods without a speaker label embedded in text.
+    /// Used by the system audio stream to route diarized speakers to separate bubbles.
+    var speakerResolver: ((Int?) -> String)?
+
+    /// Whether to request diarization from Deepgram.
+    /// Enable only on the system audio stream (multiple real speakers).
+    /// The mic stream is always a single speaker ("you") — diarize wastes compute and
+    /// can misattribute silence-padded audio to a phantom second speaker.
+    var useDiarization: Bool = false
+
     // Dependencies
     private let logger: SessionLogger
     
@@ -168,7 +180,6 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "utterance_end_ms", value: "1200"),
             URLQueryItem(name: "vad_events", value: "true"),
-            URLQueryItem(name: "diarize", value: "true"),
             // Pass API key as query param — URLSessionWebSocketTask can strip
             // custom headers during the HTTP→WS upgrade handshake
             URLQueryItem(name: "token", value: AppConfig.deepgramApiKey)
@@ -184,7 +195,16 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             // Default: no language param, Deepgram auto-detects
             queryItems.append(URLQueryItem(name: "endpointing", value: "300"))
         }
-        
+
+        // Diarization only for streams with multiple real speakers (system audio).
+        // Disabled on the mic stream — always one speaker, and diarize adds latency.
+        // max_speakers=2 tells Deepgram to expect exactly 2 speakers — reduces phantom
+        // third-speaker errors that occur when the model over-segments on silence/tone changes.
+        if useDiarization {
+            queryItems.append(URLQueryItem(name: "diarize", value: "true"))
+            queryItems.append(URLQueryItem(name: "diarize_version", value: "latest"))
+        }
+
         components.queryItems = queryItems
         return components.url!
     }
@@ -259,15 +279,10 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
               let alternative = channel.alternatives.first else {
             return
         }
-        
-        var transcript = alternative.transcript
+
+        let transcript = alternative.transcript
         guard !transcript.isEmpty else { return }
-        
-        // Diarization: prepend speaker label if available
-        if let words = alternative.words, let firstWord = words.first, let speakerId = firstWord.speaker {
-            transcript = "[Speaker \(speakerId)] \(transcript)"
-        }
-        
+
         // First successful transcript confirms stream is healthy
         if !isConnected {
             isConnected = true
@@ -277,7 +292,7 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             flushAudioBuffer()
             delegate?.deepgramClientDidConnect(self)
         }
-        
+
         // Route to the right delegate method based on Deepgram flags:
         //   speechFinal=true  → speaker paused (utterance complete) → seal bubble
         //   isFinal=true only → chunk confirmed but speaker may still be talking
@@ -288,7 +303,12 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
                 layer: "transcription",
                 details: ["text": String(transcript.prefix(50))]
             )
-            delegate?.deepgramClient(self, didReceiveSpeechFinal: transcript)
+            // For speechFinal, split by speaker and emit each group separately
+            let chunks = speakerChunks(from: alternative)
+            for chunk in chunks {
+                delegate?.deepgramClient(self, didReceiveSpeechFinal: chunk.text, speaker: chunk.speaker)
+            }
+
         } else if result.isFinal == true {
             logger.log(
                 event: "deepgram_final_transcript",
@@ -298,10 +318,44 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
                     "confidence": String(format: "%.2f", alternative.confidence)
                 ]
             )
-            delegate?.deepgramClient(self, didReceiveFinalTranscript: transcript)
+            // Split isFinal chunk by speaker groups — each group → own bubble
+            let chunks = speakerChunks(from: alternative)
+            for chunk in chunks {
+                delegate?.deepgramClient(self, didReceiveFinalTranscript: chunk.text, speaker: chunk.speaker)
+            }
+
         } else {
+            // Partial: don't split by speaker — diarization is unstable on partials.
+            // Use first word's speaker as a hint; the bubble will be corrected on isFinal.
+            let rawSpeakerId = alternative.words?.first?.speaker
+            let resolvedSpeaker = speakerResolver?(rawSpeakerId)
             logger.log(event: "deepgram_partial_transcript", layer: "transcription")
-            delegate?.deepgramClient(self, didReceivePartialTranscript: transcript)
+            delegate?.deepgramClient(self, didReceivePartialTranscript: transcript, speaker: resolvedSpeaker)
+        }
+    }
+
+    /// Groups words by consecutive speaker, returns (speaker label, joined text) pairs.
+    /// Falls back to a single chunk with the full transcript when no word-level diarization.
+    private func speakerChunks(from alternative: DeepgramTranscriptResult.Alternative) -> [(text: String, speaker: String?)] {
+        guard let resolver = speakerResolver,
+              let words = alternative.words, !words.isEmpty else {
+            // No diarization configured or no words — single chunk
+            let fallbackSpeaker = speakerResolver?(alternative.words?.first?.speaker)
+            return [(text: alternative.transcript, speaker: fallbackSpeaker)]
+        }
+
+        // Group consecutive words with the same speaker ID
+        var groups: [(speakerId: Int?, words: [String])] = []
+        for word in words {
+            if let last = groups.last, last.speakerId == word.speaker {
+                groups[groups.count - 1].words.append(word.word)
+            } else {
+                groups.append((speakerId: word.speaker, words: [word.word]))
+            }
+        }
+
+        return groups.map { group in
+            (text: group.words.joined(separator: " "), speaker: resolver(group.speakerId))
         }
     }
     
