@@ -44,19 +44,10 @@ class AudioEngine: ObservableObject {
         interleaved: true  // macOS uses interleaved
     )
     
-    /// Configuration change observer
-    private var configObserver: NSObjectProtocol?
-    
     init(logger: SessionLogger = .shared) {
         self.logger = logger
         self.deviceMonitor = DeviceMonitor(logger: logger)
         deviceMonitor.delegate = self
-    }
-    
-    deinit {
-        if let observer = configObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
     }
     
     /// Start capturing audio from the microphone
@@ -164,15 +155,6 @@ class AudioEngine: ObservableObject {
             emitter.append(samples: pcmData)
         }
         
-        // Observe configuration changes (device disconnect, sample rate change)
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleConfigurationChange()
-        }
-        
         // Start the engine
         try engine.start()
         
@@ -258,11 +240,6 @@ class AudioEngine: ObservableObject {
             engine.inputNode.removeTap(onBus: 0)
         }
         
-        if let observer = configObserver {
-            NotificationCenter.default.removeObserver(observer)
-            configObserver = nil
-        }
-        
         chunkEmitter = nil
         
         DispatchQueue.main.async {
@@ -272,80 +249,31 @@ class AudioEngine: ObservableObject {
         logger.log(event: "engine_stopped", layer: "audio")
         print("🛑 Audio engine stopped")
     }
-    
-    /// Handle audio engine configuration changes (device disconnect, sample rate change)
-    private func handleConfigurationChange() {
-        logger.log(event: "engine_config_changed", layer: "audio")
-        
-        // Configuration change often means device disconnect
-        // Attempt to restart engine
-        do {
-            try restartEngine()
-        } catch {
-            logger.log(
-                event: "engine_restart_failed",
-                layer: "audio",
-                details: ["error": error.localizedDescription]
-            )
-            
-            // Notify SessionManager about failure
-            NotificationCenter.default.post(name: .audioEngineFailed, object: nil)
-            
-            DispatchQueue.main.async {
-                self.isCapturing = false
-            }
-        }
-    }
-    
-    /// Restart the audio engine (used after device disconnect)
-    private func restartEngine() throws {
-        logger.log(event: "engine_restart_attempt", layer: "audio")
-        
-        // Stop current engine
-        if engine.isRunning {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
-        }
-        
-        chunkEmitter = nil
-        
-        // Small delay to allow system to settle
-        Thread.sleep(forTimeInterval: 0.1)
-        
-        // Restart with new default device
-        try setupEngine()
-        
-        logger.log(event: "engine_restart_success", layer: "audio")
-    }
 }
 
 // MARK: - DeviceMonitorDelegate
 extension AudioEngine: DeviceMonitorDelegate {
-    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect deviceName: String) {
-        logger.log(
-            event: "device_disconnect",
-            layer: "audio",
-            details: ["device": deviceName]
-        )
+    func deviceDidDisconnect() {
+        logger.log(event: "mic_disconnected", layer: "audio")
         
-        // Attempt to restart engine with new default device
+        // Stop recording gracefully (no crash)
+        if isCapturing {
+            stop()
+        }
+    }
+    
+    func deviceDidReconnect() {
+        logger.log(event: "mic_reconnected", layer: "audio")
+        
+        // Auto-restart recording
         do {
-            try restartEngine()
-            logger.log(event: "device_failover_success", layer: "audio")
+            try start()
         } catch {
             logger.log(
-                event: "device_failover_failed",
+                event: "restart_failed_on_reconnect",
                 layer: "audio",
                 details: ["error": error.localizedDescription]
             )
-            
-            // Notify SessionManager about failure
-            NotificationCenter.default.post(name: .audioEngineFailed, object: nil)
-            
-            // Stop capturing state
-            DispatchQueue.main.async {
-                self.isCapturing = false
-            }
         }
     }
 }

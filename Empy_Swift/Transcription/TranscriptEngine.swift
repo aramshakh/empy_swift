@@ -121,17 +121,6 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            let now = Date()
-            
-            // Ignore partials that arrive shortly after a final (out-of-order protection)
-            if let lastFinal = self.lastFinalTimestamp, now.timeIntervalSince(lastFinal) < 1.0 {
-                self.logger.log(
-                    event: "transcript_partial_ignored",
-                    layer: "transcript",
-                    details: ["reason": "recent_final"]
-                )
-                return
-            }
             
             // Remove previous partial
             if let lastID = self.lastPartialID {

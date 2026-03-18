@@ -46,6 +46,13 @@ struct RecordingView: View {
             .padding(EmpySpacing.lg)
         }
         .onAppear {
+            // Clear ALL state synchronously before async work starts —
+            // prevents last sentence of previous session leaking into new one
+            transcriptMessages = []
+            coachCards = []
+            isPaused = false
+            transcriptEngine.clearState()
+            cancellables.removeAll()
             setupObservers()
             startRecording()
             
@@ -55,6 +62,7 @@ struct RecordingView: View {
             }
         }
         .onDisappear {
+            cancellables.removeAll()
             stopRecording()
         }
     }
@@ -204,9 +212,11 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                sessionManager.stopRecording()
+                // Snapshot transcript BEFORE stopping — stopRecording() disconnects
+                // Deepgram and pending async segment mutations may not have fired yet
                 let finalTranscript = transcriptEngine.transcriptState.fullText
                     .trimmingCharacters(in: .whitespacesAndNewlines)
+                sessionManager.stopRecording()
                 coordinator.endRecording(
                     transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
                 )

@@ -3,26 +3,28 @@
 //  Empy_Swift
 //
 //  Refactored: 2026-03-03 (macOS APIs only)
-//  Port of empy-trone device monitoring
+//  Updated: T03 - Device monitoring with disconnect/reconnect detection
 //
 
 import AVFoundation
 
 /// Delegate protocol for device monitoring events
 protocol DeviceMonitorDelegate: AnyObject {
-    func deviceMonitor(_ monitor: DeviceMonitor, didDetectDisconnect deviceName: String)
+    func deviceDidDisconnect()
+    func deviceDidReconnect()
 }
 
-/// Monitors audio device changes and disconnects
+/// Monitors audio device changes and handles disconnect/reconnect events
 ///
 /// **macOS Implementation:** Uses AVAudioEngineConfigurationChange notification
-/// instead of iOS AVAudioSession route change notifications
+/// to detect device state changes and differentiate between disconnect and reconnect
 class DeviceMonitor {
     weak var delegate: DeviceMonitorDelegate?
     
     private let logger: SessionLogger
     private var configObserver: NSObjectProtocol?
     private weak var engine: AVAudioEngine?
+    private var wasRunning: Bool = false
     
     init(logger: SessionLogger = .shared) {
         self.logger = logger
@@ -36,6 +38,7 @@ class DeviceMonitor {
     /// - Parameter engine: The AVAudioEngine instance to monitor
     func startMonitoring(engine: AVAudioEngine) {
         self.engine = engine
+        self.wasRunning = engine.isRunning
         
         // Observe configuration changes (device disconnect, sample rate change, etc.)
         configObserver = NotificationCenter.default.addObserver(
@@ -61,24 +64,38 @@ class DeviceMonitor {
     }
     
     /// Handle audio engine configuration changes
+    /// Detects disconnect (engine stops) vs reconnect (device available again)
     private func handleConfigurationChange(_ notification: Notification) {
         guard let engine = engine else { return }
         
+        let isCurrentlyRunning = engine.isRunning
         let inputNode = engine.inputNode
-        let deviceName = inputNode.outputFormat(forBus: 0).channelCount > 0
-            ? "Audio Input Device"
-            : "Unknown Device"
+        let format = inputNode.outputFormat(forBus: 0)
         
         logger.log(
-            event: "device_config_changed",
+            event: "audio_config_changed",
             layer: "audio",
             details: [
-                "device": deviceName,
-                "is_running": "\(engine.isRunning)"
+                "was_running": "\(wasRunning)",
+                "is_running": "\(isCurrentlyRunning)",
+                "channels": "\(format.channelCount)",
+                "sample_rate": "\(format.sampleRate)"
             ]
         )
         
-        // Notify delegate about potential disconnect
-        delegate?.deviceMonitor(self, didDetectDisconnect: deviceName)
+        // Detect disconnect: engine was running, now stopped
+        if wasRunning && !isCurrentlyRunning {
+            logger.log(event: "mic_disconnected", layer: "audio")
+            wasRunning = false
+            delegate?.deviceDidDisconnect()
+        }
+        // Detect reconnect: engine was stopped, device is now available
+        else if !wasRunning && format.channelCount > 0 {
+            logger.log(event: "mic_reconnected", layer: "audio")
+            delegate?.deviceDidReconnect()
+        }
+        
+        // Update state for next comparison
+        wasRunning = isCurrentlyRunning
     }
 }
