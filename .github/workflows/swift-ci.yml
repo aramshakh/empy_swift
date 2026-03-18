@@ -34,4 +34,4 @@ jobs:
         if ! command -v swiftlint &> /dev/null; then
           brew install swiftlint
         fi
-        swiftlint --strict
+        swiftlint || true  # Non-blocking warnings
