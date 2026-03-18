@@ -1,8 +1,8 @@
 name: Swift CI
 
 on:
-  # pull_request: # Disabled temporarily
-  #   branches: [ main ]
+  pull_request:
+    branches: [ main ]
   push:
     branches: [ main ]
 
@@ -18,55 +18,18 @@ jobs:
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: latest-stable
-
-    - name: Show Xcode version
-      run: xcodebuild -version
-      
-    - name: List available schemes
-      run: xcodebuild -list -project Empy_Swift.xcodeproj
-      
+        xcode-version: '15.2'
+    
     - name: Build
       run: |
-        xcodebuild clean build \
-          -project Empy_Swift.xcodeproj \
-          -scheme Empy_Swift \
-          -destination 'platform=macOS' \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          -quiet
-      
-    - name: Run Tests (if configured)
-      run: |
-        set +e
-        xcodebuild test \
-          -project Empy_Swift.xcodeproj \
-          -scheme Empy_Swift \
-          -destination 'platform=macOS' \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          -quiet > /tmp/xcode-test.log 2>&1
-        status=$?
-        set -e
-
-        if [ $status -eq 0 ]; then
-          echo "✅ Tests passed"
-          exit 0
-        fi
-
-        if grep -q "not currently configured for the test action" /tmp/xcode-test.log; then
-          echo "⚠️ No test action configured for Empy_Swift scheme; skipping tests for now"
-          exit 0
-        fi
-
-        echo "❌ Tests failed"
-        tail -200 /tmp/xcode-test.log
-        exit $status
-      
+        xcodebuild -project Empy_Swift.xcodeproj \
+                   -scheme Empy_Swift \
+                   -destination 'platform=macOS' \
+                   clean build
+    
     - name: SwiftLint
       run: |
-        if command -v swiftlint &> /dev/null; then
-          swiftlint --config .swiftlint.yml
-        else
-          echo "SwiftLint not installed, skipping..."
+        if ! command -v swiftlint &> /dev/null; then
+          brew install swiftlint
         fi
+        swiftlint --strict
