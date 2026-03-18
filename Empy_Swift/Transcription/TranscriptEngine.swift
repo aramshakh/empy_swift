@@ -11,43 +11,37 @@ import Combine
 
 /// Manages transcript accumulation and state.
 ///
-/// Bubble lifecycle:
-///   partial   → update open bubble in real-time (isFinal: false)
-///   isFinal   → update open bubble with confirmed text (isFinal: true), keep open
-///   speechFinal → same as isFinal, keep open
-///   UtteranceEnd → SEAL bubble (1200ms silence = end of sentence)
-///   20s timer → force-seal if speech runs non-stop for 20s
+/// Key insight: Deepgram partials are NOT cumulative — each partial is only
+/// the current in-progress fragment, not the full sentence. We must separately
+/// track confirmedText (from isFinal chunks) and append the current partial
+/// on top of it for display.
+///
+/// Bubble lifecycle per sentence:
+///   partial       → display: confirmedText + " " + partialText  (isFinal: false)
+///   isFinal       → confirmedText += chunk; display confirmedText (isFinal: true); keep open
+///   speechFinal   → same as isFinal
+///   UtteranceEnd  → seal bubble (1200ms silence = sentence boundary)
+///   20s timer     → force-seal for non-stop speech
 class TranscriptEngine: ObservableObject {
-    /// Current transcript state (observable for UI)
     @Published private(set) var transcriptState = TranscriptState()
     
-    /// Deepgram client for receiving transcripts
     private let deepgramClient: DeepgramClient
-    
-    /// Session logger
     private let logger: SessionLogger
     
-    // MARK: - Active bubble state
+    // MARK: - Active bubble state (main thread only)
     
-    /// The currently open bubble (growing in real-time)
+    /// The segment currently displayed as the open bubble
     private var activeBubble: TranscriptSegment?
     
-    /// Speaker of the current bubble
+    /// Accumulated confirmed text for the current bubble (from isFinal chunks)
+    private var confirmedText: String = ""
+    
     private var activeBubbleSpeaker: String?
-    
-    /// When the current bubble was first opened (for 20s forced seal)
     private var bubbleStartTime: Date?
-    
-    /// Timer that force-seals the bubble after 20s of continuous speech
     private var sealTimer: Timer?
-    
-    /// Max duration before forcing a new bubble (even mid-speech)
     private let maxBubbleDuration: TimeInterval = 20.0
     
-    init(
-        deepgramClient: DeepgramClient,
-        logger: SessionLogger = .shared
-    ) {
+    init(deepgramClient: DeepgramClient, logger: SessionLogger = .shared) {
         self.deepgramClient = deepgramClient
         self.logger = logger
         self.deepgramClient.delegate = self
@@ -79,6 +73,7 @@ class TranscriptEngine: ObservableObject {
     func clearState() {
         transcriptState = TranscriptState()
         activeBubble = nil
+        confirmedText = ""
         activeBubbleSpeaker = nil
         bubbleStartTime = nil
         sealTimer?.invalidate()
@@ -92,8 +87,25 @@ class TranscriptEngine: ObservableObject {
     
     // MARK: - Bubble management (main thread only)
     
-    /// Update the active bubble text in-place, or open a new one.
-    private func updateActiveBubble(text: String, speaker: String?, isFinal: Bool) {
+    /// Show partial: confirmed text so far + current in-progress fragment.
+    /// This never advances confirmedText — only updates the display.
+    private func applyPartial(_ partialText: String) {
+        let displayText = confirmedText.isEmpty
+            ? partialText
+            : confirmedText + " " + partialText
+        writeToBubble(text: displayText, isFinal: false)
+    }
+    
+    /// Advance confirmedText with a new isFinal chunk, update bubble display.
+    private func applyFinal(_ finalText: String) {
+        confirmedText = confirmedText.isEmpty
+            ? finalText
+            : confirmedText + " " + finalText
+        writeToBubble(text: confirmedText, isFinal: true)
+    }
+    
+    /// Write text into the active bubble (in-place update) or open a new one.
+    private func writeToBubble(text: String, isFinal: Bool) {
         if let existing = activeBubble {
             let updated = TranscriptSegment(
                 updating: existing,
@@ -110,28 +122,22 @@ class TranscriptEngine: ObservableObject {
         } else {
             let newBubble = TranscriptSegment(
                 text: text,
-                speaker: speaker,
+                speaker: activeBubbleSpeaker,
                 confidence: isFinal ? 1.0 : 0.0,
                 isFinal: isFinal
             )
             activeBubble = newBubble
-            activeBubbleSpeaker = speaker
             bubbleStartTime = Date()
             transcriptState.segments.append(newBubble)
             
-            // Force-seal after maxBubbleDuration even if UtteranceEnd never fires
             sealTimer?.invalidate()
-            sealTimer = Timer.scheduledTimer(
-                withTimeInterval: maxBubbleDuration,
-                repeats: false
-            ) { [weak self] _ in
+            sealTimer = Timer.scheduledTimer(withTimeInterval: maxBubbleDuration, repeats: false) { [weak self] _ in
                 self?.sealActiveBubble()
             }
         }
     }
     
-    /// Seal the active bubble: mark final, clear active state.
-    /// Next speech will open a fresh bubble below.
+    /// Seal the bubble: mark isFinal=true, reset confirmed text, clear active state.
     private func sealActiveBubble() {
         guard let existing = activeBubble else { return }
         
@@ -146,13 +152,14 @@ class TranscriptEngine: ObservableObject {
         }
         
         activeBubble = nil
+        confirmedText = ""          // ← reset for next sentence
         activeBubbleSpeaker = nil
         bubbleStartTime = nil
         sealTimer?.invalidate()
         sealTimer = nil
         
         logger.log(event: "transcript_bubble_sealed", layer: "transcript",
-                   details: ["text_preview": String(sealed.text.prefix(50))])
+                   details: ["text_preview": String(sealed.text.prefix(60))])
     }
 }
 
@@ -163,8 +170,8 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Real-time preview — bubble stays open, text grows
-            self.updateActiveBubble(text: transcript, speaker: self.activeBubbleSpeaker, isFinal: false)
+            // Show confirmedText + in-progress fragment — does NOT advance confirmedText
+            self.applyPartial(transcript)
         }
     }
     
@@ -172,8 +179,8 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Confirmed chunk — update bubble, keep open until UtteranceEnd
-            self.updateActiveBubble(text: transcript, speaker: self.activeBubbleSpeaker, isFinal: true)
+            // Deepgram confirmed this chunk — append to confirmedText, bubble stays open
+            self.applyFinal(transcript)
         }
     }
     
@@ -181,15 +188,15 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Last confirmed chunk before pause — update, keep open until UtteranceEnd
-            self.updateActiveBubble(text: transcript, speaker: self.activeBubbleSpeaker, isFinal: true)
+            // Last confirmed chunk before a pause — append, bubble stays open
+            self.applyFinal(transcript)
         }
     }
     
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // 1200ms of silence = end of sentence → seal, next speech = new bubble
+            // 1200ms silence = end of sentence → seal, next speech opens fresh bubble
             self.sealActiveBubble()
         }
     }
