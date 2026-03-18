@@ -191,11 +191,21 @@ struct RecordingView: View {
                 // Snapshot messages BEFORE stopping — stopRecording() disconnects
                 // Deepgram and pending async segment mutations may not have fired yet
                 let finalMessages = transcriptEngine.transcriptState.segments.map { segment in
-                    TranscriptMessage(
+                    // Convert speaker String? to Speaker enum
+                    let speakerEnum: Speaker
+                    if let speakerName = segment.speaker, speakerName.lowercased() == "you" {
+                        speakerEnum = .you
+                    } else if let speakerName = segment.speaker {
+                        speakerEnum = .participant(name: speakerName)
+                    } else {
+                        speakerEnum = .participant(name: "Other")
+                    }
+                    
+                    return TranscriptMessage(
                         id: segment.id,
-                        speaker: segment.speaker,
+                        speaker: speakerEnum,
                         text: segment.text,
-                        timestamp: segment.startTime,
+                        timestamp: segment.timestamp,
                         isFinal: segment.isFinal
                     )
                 }
