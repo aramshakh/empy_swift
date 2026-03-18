@@ -78,7 +78,7 @@ struct RecordingView: View {
                 transcriptMessages = state.segments.map { segment in
                     TranscriptMessage(
                         id: segment.id,
-                        speaker: segment.speaker.flatMap { .participant(name: $0) } ?? .you,
+                        speaker: Self.speakerFrom(segment.speaker),
                         text: segment.text,
                         timestamp: segment.timestamp,
                         isFinal: segment.isFinal
@@ -94,6 +94,16 @@ struct RecordingView: View {
     
     private func stopRecording() {
         sessionManager.stopRecording()
+    }
+    
+    // MARK: - Speaker mapping
+    
+    /// Maps a segment's speaker String? ("you" / "Other" / nil) to the Speaker enum.
+    /// "you" → .you (right bubble, blue)
+    /// anything else → .participant (left bubble, gray)
+    private static func speakerFrom(_ speaker: String?) -> Speaker {
+        guard let s = speaker, !s.isEmpty else { return .you }
+        return s.lowercased() == "you" ? .you : .participant(name: s)
     }
     
     // MARK: - Talk Ratio Calculation
@@ -185,19 +195,9 @@ struct RecordingView: View {
                 // Snapshot messages BEFORE stopping — stopRecording() disconnects
                 // Deepgram and pending async segment mutations may not have fired yet
                 let finalMessages = transcriptEngine.transcriptState.segments.map { segment in
-                    // Convert speaker String? to Speaker enum
-                    let speakerEnum: Speaker
-                    if let speakerName = segment.speaker, speakerName.lowercased() == "you" {
-                        speakerEnum = .you
-                    } else if let speakerName = segment.speaker {
-                        speakerEnum = .participant(name: speakerName)
-                    } else {
-                        speakerEnum = .participant(name: "Other")
-                    }
-                    
-                    return TranscriptMessage(
+                    TranscriptMessage(
                         id: segment.id,
-                        speaker: speakerEnum,
+                        speaker: Self.speakerFrom(segment.speaker),
                         text: segment.text,
                         timestamp: segment.timestamp,
                         isFinal: segment.isFinal
