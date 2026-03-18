@@ -130,36 +130,31 @@ class TranscriptEngine: ObservableObject {
 
 extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String, speaker: String?) {
-        let now = Date()
-        
-        // Ignore partials that arrive shortly after a final (out-of-order protection)
-        if let lastFinal = lastFinalTimestamp, now.timeIntervalSince(lastFinal) < 1.0 {
-            logger.log(
-                event: "transcript_partial_ignored",
-                layer: "transcript",
-                details: ["reason": "recent_final"]
-            )
-            return
-        }
-        
-        let segment = TranscriptSegment(
-            text: transcript,
-            speaker: speaker,
-            confidence: 0.0,
-            isFinal: false
-        )
-        
-        let prevID = lastPartialID
-        partialSegments[segment.id] = segment
-        lastPartialID = segment.id
-        
-        // Mutate @Published on main thread to avoid runtime warnings
+        // All state mutations on main thread — avoids data race between
+        // background URLSession callbacks and async main-thread blocks
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if let oldID = prevID {
+            let now = Date()
+            
+            // Ignore partials that arrive shortly after a final (out-of-order protection)
+            if let lastFinal = self.lastFinalTimestamp, now.timeIntervalSince(lastFinal) < 1.0 {
+                return
+            }
+            
+            // Remove previous partial
+            if let oldID = self.lastPartialID {
                 self.partialSegments.removeValue(forKey: oldID)
                 self.transcriptState.segments.removeAll { $0.id == oldID }
             }
+            
+            let segment = TranscriptSegment(
+                text: transcript,
+                speaker: speaker,
+                confidence: 0.0,
+                isFinal: false
+            )
+            self.partialSegments[segment.id] = segment
+            self.lastPartialID = segment.id
             self.transcriptState.segments.append(segment)
         }
         
@@ -167,35 +162,31 @@ extension TranscriptEngine: DeepgramClientDelegate {
         logger.log(
             event: "transcript_partial_received",
             layer: "transcript",
-            details: [
-                "length": "\(transcript.count)",
-                "words": "\(wordCount)"
-            ]
+            details: ["length": "\(transcript.count)", "words": "\(wordCount)"]
         )
     }
     
     func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String, speaker: String?) {
         guard !transcript.isEmpty else { return }
         
-        let segment = TranscriptSegment(
-            text: transcript,
-            speaker: speaker,
-            confidence: 1.0,
-            isFinal: true
-        )
-        
-        let prevPartialID = lastPartialID
-        lastPartialID = nil
-        lastFinalTimestamp = Date()
-        
-        // Mutate @Published on main thread to avoid runtime warnings
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if let oldID = prevPartialID {
+            
+            // Remove any pending partial (replaced by this final)
+            if let oldID = self.lastPartialID {
                 self.partialSegments.removeValue(forKey: oldID)
                 self.transcriptState.segments.removeAll { $0.id == oldID }
+                self.lastPartialID = nil
             }
+            
+            let segment = TranscriptSegment(
+                text: transcript,
+                speaker: speaker,
+                confidence: 1.0,
+                isFinal: true
+            )
             self.transcriptState.segments.append(segment)
+            self.lastFinalTimestamp = Date()
         }
         
         let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
@@ -204,8 +195,7 @@ extension TranscriptEngine: DeepgramClientDelegate {
             layer: "transcript",
             details: [
                 "text": String(transcript.prefix(50)),
-                "word_count": "\(wordCount)",
-                "total_words": "\(transcriptState.wordCount)"
+                "word_count": "\(wordCount)"
             ]
         )
     }

@@ -131,9 +131,10 @@ class DeepgramClient {
             URLQueryItem(name: "sample_rate", value: "16000"),
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "interim_results", value: "true"),
-            URLQueryItem(name: "endpointing", value: "true"),
+            URLQueryItem(name: "endpointing", value: "300"),   // ms — "true" is invalid and ignored by Deepgram
             URLQueryItem(name: "utterance_end_ms", value: "1000"),
-            URLQueryItem(name: "diarize", value: "true")
+            URLQueryItem(name: "diarize", value: "true"),
+            URLQueryItem(name: "token", value: AppConfig.deepgramApiKey) // fallback: Authorization header can be stripped during WS upgrade
         ]
         return components.url!
     }
@@ -306,17 +307,22 @@ class DeepgramClient {
         )
         
         stopReconnectTimer()
-        reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            guard let self = self else { return }
-            do {
-                try self.connect()
-            } catch {
-                self.logger.log(
-                    event: "deepgram_reconnect_failed",
-                    layer: "transcription",
-                    details: ["error": error.localizedDescription]
-                )
-                self.attemptReconnect() // Try again
+        // Timer must be scheduled on main run loop — attemptReconnect can be
+        // called from a URLSession background thread via handleDisconnection()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                do {
+                    try self.connect()
+                } catch {
+                    self.logger.log(
+                        event: "deepgram_reconnect_failed",
+                        layer: "transcription",
+                        details: ["error": error.localizedDescription]
+                    )
+                    self.attemptReconnect()
+                }
             }
         }
     }
@@ -374,11 +380,14 @@ class DeepgramClient {
     
     private func startDegradationTimer() {
         stopDegradationTimer()
-        degradationTimer = Timer.scheduledTimer(
-            withTimeInterval: degradationThreshold,
-            repeats: false
-        ) { [weak self] _ in
-            self?.emitDegradation()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.degradationTimer = Timer.scheduledTimer(
+                withTimeInterval: self.degradationThreshold,
+                repeats: false
+            ) { [weak self] _ in
+                self?.emitDegradation()
+            }
         }
     }
     
