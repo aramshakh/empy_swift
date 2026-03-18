@@ -20,6 +20,7 @@ struct RecordingView: View {
     @State private var cancellables = Set<AnyCancellable>()
     @State private var coachCards: [CoachCard] = []
     @State private var selectedTab: RecordingTab = .transcript
+    @State private var showAudioSettings: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -133,6 +134,26 @@ struct RecordingView: View {
                 .font(.empyCaption)
             
             Spacer()
+
+            Divider()
+
+            // Gear button → AudioSettings popover
+            Button {
+                showAudioSettings.toggle()
+            } label: {
+                HStack(spacing: EmpySpacing.xs) {
+                    Image(systemName: "gearshape")
+                    Text("Audio")
+                        .font(.empyCaption)
+                }
+                .foregroundColor(.empySecondaryText)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showAudioSettings, arrowEdge: .trailing) {
+                AudioSettingsView(isInSession: true)
+                    .padding()
+                    .frame(width: 300)
+            }
         }
         .padding(EmpySpacing.md)
         .background(Color(NSColor.controlBackgroundColor))
