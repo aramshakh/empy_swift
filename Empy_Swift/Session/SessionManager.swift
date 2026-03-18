@@ -29,7 +29,7 @@ class SessionManager: ObservableObject {
     @Published private(set) var elapsed: TimeInterval = 0
     
     // Dependencies
-    private let audioEngine: AudioEngine
+    private let dualStreamManager: DualStreamManager
     private let deepgramClient: DeepgramClient
     private let transcriptEngine: TranscriptEngine
     private let logger: SessionLogger
@@ -42,11 +42,11 @@ class SessionManager: ObservableObject {
     static let shared = SessionManager()
     
     init(
-        audioEngine: AudioEngine = AudioEngine(),
+        dualStreamManager: DualStreamManager = DualStreamManager(),
         deepgramClient: DeepgramClient = DeepgramClient(),
         logger: SessionLogger = .shared
     ) {
-        self.audioEngine = audioEngine
+        self.dualStreamManager = dualStreamManager
         self.deepgramClient = deepgramClient
         self.transcriptEngine = TranscriptEngine(
             deepgramClient: deepgramClient,
@@ -77,27 +77,52 @@ class SessionManager: ObservableObject {
     // MARK: - Public API
     
     /// Start recording session
-    func startRecording() throws {
+    func startRecording() {
         if logger.currentSession() == nil {
             logger.startSession(id: UUID().uuidString)
         }
         logger.log(event: "session_start", layer: "session")
         
-        // 1. Wire AudioEngine → DeepgramClient
-        audioEngine.onChunk = { [weak self] chunk in
+        // 1. Wire DualStreamManager → DeepgramClient
+        // Microphone stream
+        dualStreamManager.onMicChunk = { [weak self] chunk in
             self?.deepgramClient.send(audioData: chunk.pcmData)
         }
         
-        // 2. Start audio capture first
-        try audioEngine.start()
-
-        // 3. Connect transcription after audio is flowing
-        try transcriptEngine.startSession()
-
-        // 4. Update state
-        state = .recording
-        sessionStartTime = Date()
-        startTimer()
+        // System audio stream
+        dualStreamManager.onSystemBuffer = { [weak self] buffer in
+            // Convert Float32 buffer to Data
+            if let pcmData = self?.convertBufferToData(buffer) {
+                self?.deepgramClient.send(audioData: pcmData)
+            }
+        }
+        
+        // 2. Start dual audio capture (async)
+        Task {
+            do {
+                try await dualStreamManager.start()
+                
+                // 3. Connect transcription after audio is flowing
+                try transcriptEngine.startSession()
+                
+                // 4. Update state
+                await MainActor.run {
+                    state = .recording
+                    sessionStartTime = Date()
+                    startTimer()
+                }
+            } catch {
+                logger.log(
+                    event: "session_start_failed",
+                    layer: "session",
+                    details: ["error": error.localizedDescription]
+                )
+                
+                await MainActor.run {
+                    state = .idle
+                }
+            }
+        }
     }
     
     /// Stop recording session
@@ -105,10 +130,8 @@ class SessionManager: ObservableObject {
         logger.log(event: "session_stop", layer: "session")
         
         // Stop components
-        audioEngine.stop()
-        
-        // End transcription session async (waits for final transcripts)
         Task {
+            await dualStreamManager.stop()
             await transcriptEngine.endSession()
         }
         
@@ -125,18 +148,32 @@ class SessionManager: ObservableObject {
     func pauseRecording() {
         logger.log(event: "session_pause", layer: "session")
         
-        audioEngine.stop()
+        Task {
+            await dualStreamManager.stop()
+        }
         state = .paused
         timerCancellable?.cancel()
     }
     
     /// Resume recording
-    func resumeRecording() throws {
+    func resumeRecording() {
         logger.log(event: "session_resume", layer: "session")
         
-        try audioEngine.start()
-        state = .recording
-        startTimer()
+        Task {
+            do {
+                try await dualStreamManager.start()
+                await MainActor.run {
+                    state = .recording
+                    startTimer()
+                }
+            } catch {
+                logger.log(
+                    event: "session_resume_failed",
+                    layer: "session",
+                    details: ["error": error.localizedDescription]
+                )
+            }
+        }
     }
     
     /// Get transcript engine for UI observation
@@ -145,6 +182,33 @@ class SessionManager: ObservableObject {
     }
     
     // MARK: - Private Helpers
+    
+    /// Convert AVAudioPCMBuffer to PCM Data
+    private func convertBufferToData(_ buffer: AVAudioPCMBuffer) -> Data? {
+        guard let channelData = buffer.floatChannelData else {
+            return nil
+        }
+        
+        let frameLength = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        
+        // Convert Float32 to Int16 PCM
+        var int16Data = [Int16]()
+        int16Data.reserveCapacity(frameLength * channelCount)
+        
+        for frame in 0..<frameLength {
+            for channel in 0..<channelCount {
+                let sample = channelData[channel][frame]
+                // Clamp and convert to Int16
+                let clampedSample = max(-1.0, min(1.0, sample))
+                let int16Sample = Int16(clampedSample * Float(Int16.max))
+                int16Data.append(int16Sample)
+            }
+        }
+        
+        // Convert to Data
+        return int16Data.withUnsafeBytes { Data($0) }
+    }
     
     private func startTimer() {
         timerCancellable = Timer.publish(every: 0.1, on: .main, in: .common)

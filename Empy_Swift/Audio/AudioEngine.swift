@@ -125,8 +125,8 @@ class AudioEngine: ObservableObject {
             ]
         )
         
-        // Create chunk emitter
-        let emitter = ChunkEmitter()
+        // Create chunk emitter for microphone
+        let emitter = ChunkEmitter(source: .microphone)
         emitter.onChunk = { [weak self] chunk in
             self?.onChunk?(chunk)
         }

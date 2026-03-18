@@ -1,7 +1,16 @@
 import Foundation
 
-/// Represents a chunk of audio data captured from the microphone
+/// Audio source type for dual-stream capture
+enum AudioSource {
+    case microphone
+    case system
+}
+
+/// Represents a chunk of audio data captured from microphone or system
 struct AudioChunk {
+    /// Audio source (microphone or system)
+    let source: AudioSource
+    
     /// Monotonically increasing sequence ID, starting at 0
     let seqId: UInt64
     

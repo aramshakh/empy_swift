@@ -16,10 +16,14 @@ class ChunkEmitter {
     /// Session start time in mach absolute time units
     private let startTime: UInt64
     
+    /// Audio source for this emitter
+    private let source: AudioSource
+    
     /// Callback invoked when a chunk is ready
     var onChunk: ((AudioChunk) -> Void)?
     
-    init() {
+    init(source: AudioSource = .microphone) {
+        self.source = source
         self.startTime = mach_absolute_time()
     }
     
@@ -33,6 +37,7 @@ class ChunkEmitter {
             let chunkData = buffer.prefix(chunkSize)
             
             let chunk = AudioChunk(
+                source: source,
                 seqId: seqId,
                 pcmData: Data(chunkData),
                 sessionElapsedMs: calculateElapsed(),
