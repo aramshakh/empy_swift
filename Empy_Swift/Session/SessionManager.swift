@@ -8,6 +8,7 @@
 
 import Foundation
 import Combine
+import AVFoundation
 
 /// Session states
 enum SessionState {
