@@ -113,6 +113,14 @@ class AudioEngine: ObservableObject {
         }
         
         let inputNode = engine.inputNode
+        
+        // Remove any stale tap before touching the node
+        inputNode.removeTap(onBus: 0)
+        
+        // Start the engine FIRST so inputNode reflects the real hardware format
+        try engine.start()
+        
+        // Read the actual hardware format AFTER engine start
         let inputFormat = inputNode.outputFormat(forBus: 0)
         
         logger.log(
@@ -125,38 +133,27 @@ class AudioEngine: ObservableObject {
             ]
         )
         
-        // Create chunk emitter
-        let emitter = ChunkEmitter()
+        // Create chunk emitter for microphone
+        let emitter = ChunkEmitter(source: .microphone)
         emitter.onChunk = { [weak self] chunk in
             self?.onChunk?(chunk)
         }
         self.chunkEmitter = emitter
         
-        // Install tap on input node
-        // Buffer size: ~100ms at target sample rate = 1600 frames
+        // Install tap with the real hardware format — no mismatch possible
+        // Buffer size: ~100ms at 16kHz = 1600 frames
         let bufferSize: AVAudioFrameCount = 1600
-        
-        // CRITICAL FIX: Remove existing tap to prevent crash
-        inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, time in
             guard let self = self, let emitter = self.chunkEmitter else { return }
             
-            // Convert audio buffer to target format
             guard let convertedBuffer = self.convert(buffer: buffer, to: targetFormat) else {
                 return
             }
-            
-            // Extract PCM data from the buffer
             guard let pcmData = self.extractPCMData(from: convertedBuffer) else {
                 return
             }
-            
-            // Append to chunk emitter
             emitter.append(samples: pcmData)
         }
-        
-        // Start the engine
-        try engine.start()
         
         DispatchQueue.main.async {
             self.isCapturing = true

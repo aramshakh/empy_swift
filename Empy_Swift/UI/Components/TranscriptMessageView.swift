@@ -57,7 +57,7 @@ struct TranscriptMessageView: View {
     }
     
     private var bubbleColor: Color {
-        isYou ? Color.blue : Color(NSColor.controlBackgroundColor)
+        isYou ? Color.blue : Color(NSColor.tertiaryLabelColor).opacity(0.15)
     }
     
     private var speakerLabel: String {

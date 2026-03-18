@@ -9,6 +9,8 @@
 import SwiftUI
 import Combine
 
+enum RecordingTab { case transcript, agent }
+
 struct RecordingView: View {
     @EnvironmentObject var coordinator: NavigationCoordinator
     @EnvironmentObject var sessionManager: SessionManager
@@ -17,49 +19,37 @@ struct RecordingView: View {
     @State private var transcriptMessages: [TranscriptMessage] = []
     @State private var cancellables = Set<AnyCancellable>()
     @State private var coachCards: [CoachCard] = []
-    
+    @State private var selectedTab: RecordingTab = .transcript
+
     var body: some View {
         VStack(spacing: 0) {
-            // Main content: Sidebar + Transcript
+            // Main content: Sidebar + tabbed area
             HSplitView {
                 // Left sidebar
                 sidebarView()
                     .frame(width: 280)
-                
-                // Main transcript area
-                transcriptAreaView()
+
+                // Right: tab picker + content
+                VStack(spacing: 0) {
+                    tabPickerView()
+                    Divider()
+                    tabContentView()
+                }
             }
-            
+
             // Bottom control bar
             controlBarView()
         }
         .navigationTitle("Recording")
-        .overlay(alignment: .topTrailing) {
-            VStack(spacing: EmpySpacing.md) {
-                ForEach(coachCards) { card in
-                    CoachCardView(card: card) {
-                        coachCards.removeAll { $0.id == card.id }
-                    }
-                }
-            }
-            .frame(width: 350)
-            .padding(EmpySpacing.lg)
-        }
         .onAppear {
-            // Clear ALL state synchronously before async work starts —
-            // prevents last sentence of previous session leaking into new one
             transcriptMessages = []
             coachCards = []
             isPaused = false
+            selectedTab = .transcript
             transcriptEngine.clearState()
             cancellables.removeAll()
             setupObservers()
             startRecording()
-            
-            // Test: show card after 3 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                addMockCoachCard()
-            }
         }
         .onDisappear {
             cancellables.removeAll()
@@ -78,7 +68,7 @@ struct RecordingView: View {
                 transcriptMessages = state.segments.map { segment in
                     TranscriptMessage(
                         id: segment.id,
-                        speaker: segment.speaker.flatMap { .participant(name: $0) } ?? .you,
+                        speaker: Self.speakerFrom(segment.speaker),
                         text: segment.text,
                         timestamp: segment.timestamp,
                         isFinal: segment.isFinal
@@ -89,17 +79,21 @@ struct RecordingView: View {
     }
     
     private func startRecording() {
-        Task {
-            do {
-                try sessionManager.startRecording()
-            } catch {
-                print("Failed to start recording: \(error)")
-            }
-        }
+        sessionManager.startRecording()
     }
     
     private func stopRecording() {
         sessionManager.stopRecording()
+    }
+    
+    // MARK: - Speaker mapping
+    
+    /// Maps a segment's speaker String? ("you" / "Other" / nil) to the Speaker enum.
+    /// "you" → .you (right bubble, blue)
+    /// anything else → .participant (left bubble, gray)
+    private static func speakerFrom(_ speaker: String?) -> Speaker {
+        guard let s = speaker, !s.isEmpty else { return .you }
+        return s.lowercased() == "you" ? .you : .participant(name: s)
     }
     
     // MARK: - Talk Ratio Calculation
@@ -138,27 +132,75 @@ struct RecordingView: View {
             Text("Stats placeholder")
                 .font(.empyCaption)
             
-            Divider()
-            
-            Text("Coach Cards")
-                .font(.empyLabel)
-                .foregroundColor(.empySecondaryText)
-            
-            Text("Coach cards placeholder")
-                .font(.empyCaption)
-            
             Spacer()
         }
         .padding(EmpySpacing.md)
         .background(Color(NSColor.controlBackgroundColor))
     }
     
+    // MARK: - Tab picker
+
+    private func tabPickerView() -> some View {
+        HStack(spacing: 0) {
+            tabButton(title: "Transcript", tab: .transcript)
+            tabButton(title: "Agent", tab: .agent, badge: coachCards.count)
+        }
+        .padding(.horizontal, EmpySpacing.md)
+        .padding(.top, EmpySpacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func tabButton(title: String, tab: RecordingTab, badge: Int = 0) -> some View {
+        let isSelected = selectedTab == tab
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { selectedTab = tab }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                    .font(.empyLabel)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.accentColor))
+                }
+            }
+            .foregroundColor(isSelected ? .primary : .secondary)
+            .padding(.horizontal, EmpySpacing.sm)
+            .padding(.vertical, 6)
+            .overlay(alignment: .bottom) {
+                if isSelected {
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(height: 2)
+                        .padding(.horizontal, 2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Tab content
+
+    @ViewBuilder
+    private func tabContentView() -> some View {
+        switch selectedTab {
+        case .transcript:
+            transcriptAreaView()
+        case .agent:
+            AgentFeedView(cards: coachCards)
+        }
+    }
+
     // MARK: - Transcript Area
-    
+
     private func transcriptAreaView() -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // Alignment is handled inside each TranscriptMessageView (iMessage style)
                 LazyVStack(spacing: EmpySpacing.xs) {
                     ForEach(transcriptMessages) { message in
                         TranscriptMessageView(message: message)
@@ -174,7 +216,6 @@ struct RecordingView: View {
                     }
                 }
             }
-            // Also scroll when the last bubble's text updates (partial growing)
             .onChange(of: transcriptMessages.last?.text) { _ in
                 if let lastMessage = transcriptMessages.last {
                     proxy.scrollTo(lastMessage.id, anchor: .bottom)
@@ -188,14 +229,19 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                // Snapshot transcript BEFORE stopping — stopRecording() disconnects
+                // Snapshot messages BEFORE stopping — stopRecording() disconnects
                 // Deepgram and pending async segment mutations may not have fired yet
-                let finalTranscript = transcriptEngine.transcriptState.fullText
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let finalMessages = transcriptEngine.transcriptState.segments.map { segment in
+                    TranscriptMessage(
+                        id: segment.id,
+                        speaker: Self.speakerFrom(segment.speaker),
+                        text: segment.text,
+                        timestamp: segment.timestamp,
+                        isFinal: segment.isFinal
+                    )
+                }
                 sessionManager.stopRecording()
-                coordinator.endRecording(
-                    transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
-                )
+                coordinator.endRecording(messages: finalMessages)
             } label: {
                 HStack {
                     Image(systemName: "stop.fill")
@@ -208,7 +254,7 @@ struct RecordingView: View {
             
             Button {
                 if isPaused {
-                    try? sessionManager.resumeRecording()
+                    sessionManager.resumeRecording()
                 } else {
                     sessionManager.pauseRecording()
                 }
@@ -227,24 +273,7 @@ struct RecordingView: View {
         .background(Color(NSColor.controlBackgroundColor))
     }
     
-    // MARK: - Mock Coach Cards (for testing)
-    
-    private func addMockCoachCard() {
-        let mockCards: [(CoachCardType, String, String)] = [
-            (.warning, "Speaking too fast", "Try to slow down for clarity"),
-            (.tip, "Ask open questions", "Open-ended questions encourage dialogue"),
-            (.insight, "Good balance", "You're maintaining balanced talk time")
-        ]
-        
-        let random = mockCards.randomElement()!
-        let card = CoachCard(type: random.0, title: random.1, message: random.2)
-        coachCards.append(card)
-        
-        // Auto-dismiss after 8 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            coachCards.removeAll { $0.id == card.id }
-        }
-    }
+
 }
 
 #Preview {

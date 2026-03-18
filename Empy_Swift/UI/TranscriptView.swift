@@ -14,29 +14,23 @@ struct TranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(spacing: 4) {
                     ForEach(transcriptEngine.transcriptState.segments) { segment in
-                        VStack(alignment: .leading, spacing: 4) {
-                            // Speaker label
-                            if let speaker = segment.speaker {
-                                Text(speaker)
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            // Text
-                            Text(segment.text)
-                                .font(.body)
-                                .foregroundColor(segment.isFinal ? .primary : .secondary)
-                        }
+                        TranscriptMessageView(
+                            message: TranscriptMessage(
+                                id: segment.id,
+                                speaker: speakerFrom(segment.speaker),
+                                text: segment.text,
+                                timestamp: segment.timestamp,
+                                isFinal: segment.isFinal
+                            )
+                        )
                         .id(segment.id)
                     }
                 }
-                .padding()
+                .padding(EmpySpacing.md)
             }
             .onChange(of: transcriptEngine.transcriptState.segments.count) { _ in
-                // Auto-scroll to bottom
                 if let lastId = transcriptEngine.transcriptState.segments.last?.id {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(lastId, anchor: .bottom)
@@ -45,6 +39,11 @@ struct TranscriptView: View {
             }
         }
         .background(Color(NSColor.textBackgroundColor))
+    }
+    
+    private func speakerFrom(_ speaker: String?) -> Speaker {
+        guard let s = speaker, !s.isEmpty else { return .you }
+        return s.lowercased() == "you" ? .you : .participant(name: s)
     }
 }
 
