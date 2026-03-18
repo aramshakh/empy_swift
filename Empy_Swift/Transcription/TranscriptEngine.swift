@@ -9,7 +9,14 @@
 import Foundation
 import Combine
 
-/// Manages transcript accumulation and state
+/// Manages transcript accumulation and state.
+///
+/// Bubble lifecycle:
+///   partial   → update open bubble in real-time (isFinal: false)
+///   isFinal   → update open bubble with confirmed text (isFinal: true), keep open
+///   speechFinal → same as isFinal, keep open
+///   UtteranceEnd → SEAL bubble (1200ms silence = end of sentence)
+///   20s timer → force-seal if speech runs non-stop for 20s
 class TranscriptEngine: ObservableObject {
     /// Current transcript state (observable for UI)
     @Published private(set) var transcriptState = TranscriptState()
@@ -31,7 +38,7 @@ class TranscriptEngine: ObservableObject {
     /// When the current bubble was first opened (for 20s forced seal)
     private var bubbleStartTime: Date?
     
-    /// Timer that seals the bubble after 20s of continuous speech
+    /// Timer that force-seals the bubble after 20s of continuous speech
     private var sealTimer: Timer?
     
     /// Max duration before forcing a new bubble (even mid-speech)
@@ -48,45 +55,27 @@ class TranscriptEngine: ObservableObject {
     
     // MARK: - Public API
     
-    /// Start transcription session
     func startSession() throws {
         clearState()
-
         do {
             try deepgramClient.connect()
             logger.log(event: "transcription_session_started", layer: "transcript")
         } catch {
-            logger.log(
-                event: "transcription_session_failed",
-                layer: "transcript",
-                details: ["error": error.localizedDescription]
-            )
+            logger.log(event: "transcription_session_failed", layer: "transcript",
+                       details: ["error": error.localizedDescription])
             throw error
         }
     }
     
-    /// End transcription session
     func endSession() async {
-        // Give Deepgram time to send final transcripts before disconnecting
-        try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
-        
-        await MainActor.run {
-            // Seal any open bubble as final
-            sealActiveBubble()
-        }
-        
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        await MainActor.run { sealActiveBubble() }
         deepgramClient.disconnect()
-        logger.log(
-            event: "transcription_session_ended",
-            layer: "transcript",
-            details: [
-                "final_word_count": "\(transcriptState.wordCount)",
-                "segment_count": "\(transcriptState.finalCount)"
-            ]
-        )
+        logger.log(event: "transcription_session_ended", layer: "transcript",
+                   details: ["final_word_count": "\(transcriptState.wordCount)",
+                             "segment_count": "\(transcriptState.finalCount)"])
     }
     
-    /// Clear all transcript state
     func clearState() {
         transcriptState = TranscriptState()
         activeBubble = nil
@@ -94,23 +83,24 @@ class TranscriptEngine: ObservableObject {
         bubbleStartTime = nil
         sealTimer?.invalidate()
         sealTimer = nil
-        
         logger.log(event: "transcript_state_cleared", layer: "transcript")
     }
     
-    /// Send audio chunk to Deepgram
     func processAudioChunk(_ audioData: Data) {
         deepgramClient.send(audioData: audioData)
     }
     
-    // MARK: - Bubble management (always called on main thread)
+    // MARK: - Bubble management (main thread only)
     
-    /// Update the active bubble's text in-place, or open a new one.
-    /// isFinal=false → partial (live preview); isFinal=true → confirmed text.
+    /// Update the active bubble text in-place, or open a new one.
     private func updateActiveBubble(text: String, speaker: String?, isFinal: Bool) {
         if let existing = activeBubble {
-            // Update in-place — same UUID, so ForEach doesn't re-create the row
-            let updated = TranscriptSegment(updating: existing, text: text, confidence: isFinal ? 1.0 : 0.0, isFinal: isFinal)
+            let updated = TranscriptSegment(
+                updating: existing,
+                text: text,
+                confidence: isFinal ? 1.0 : 0.0,
+                isFinal: isFinal
+            )
             if let idx = transcriptState.segments.firstIndex(where: { $0.id == existing.id }) {
                 transcriptState.segments[idx] = updated
             } else {
@@ -118,7 +108,6 @@ class TranscriptEngine: ObservableObject {
             }
             activeBubble = updated
         } else {
-            // Open a new bubble
             let newBubble = TranscriptSegment(
                 text: text,
                 speaker: speaker,
@@ -130,20 +119,28 @@ class TranscriptEngine: ObservableObject {
             bubbleStartTime = Date()
             transcriptState.segments.append(newBubble)
             
-            // Start 20s forced-seal timer on main thread
+            // Force-seal after maxBubbleDuration even if UtteranceEnd never fires
             sealTimer?.invalidate()
-            sealTimer = Timer.scheduledTimer(withTimeInterval: maxBubbleDuration, repeats: false) { [weak self] _ in
+            sealTimer = Timer.scheduledTimer(
+                withTimeInterval: maxBubbleDuration,
+                repeats: false
+            ) { [weak self] _ in
                 self?.sealActiveBubble()
             }
         }
     }
     
-    /// Permanently seal the active bubble (mark isFinal=true, clear active state).
-    /// After this, the next speech opens a fresh bubble below.
+    /// Seal the active bubble: mark final, clear active state.
+    /// Next speech will open a fresh bubble below.
     private func sealActiveBubble() {
         guard let existing = activeBubble else { return }
         
-        let sealed = TranscriptSegment(updating: existing, text: existing.text, confidence: 1.0, isFinal: true)
+        let sealed = TranscriptSegment(
+            updating: existing,
+            text: existing.text,
+            confidence: 1.0,
+            isFinal: true
+        )
         if let idx = transcriptState.segments.firstIndex(where: { $0.id == existing.id }) {
             transcriptState.segments[idx] = sealed
         }
@@ -154,11 +151,8 @@ class TranscriptEngine: ObservableObject {
         sealTimer?.invalidate()
         sealTimer = nil
         
-        logger.log(
-            event: "transcript_bubble_sealed",
-            layer: "transcript",
-            details: ["text_preview": String(sealed.text.prefix(50))]
-        )
+        logger.log(event: "transcript_bubble_sealed", layer: "transcript",
+                   details: ["text_preview": String(sealed.text.prefix(50))])
     }
 }
 
@@ -169,44 +163,40 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Live preview: update current bubble with partial text (isFinal: false)
+            // Real-time preview — bubble stays open, text grows
             self.updateActiveBubble(text: transcript, speaker: self.activeBubbleSpeaker, isFinal: false)
         }
     }
     
     func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String) {
         guard !transcript.isEmpty else { return }
-        
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // Confirmed text for current bubble
+            // Confirmed chunk — update bubble, keep open until UtteranceEnd
             self.updateActiveBubble(text: transcript, speaker: self.activeBubbleSpeaker, isFinal: true)
         }
     }
     
     func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal transcript: String) {
         guard !transcript.isEmpty else { return }
-        
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            // speechFinal = speaker paused → update bubble with final text, then seal it
+            // Last confirmed chunk before pause — update, keep open until UtteranceEnd
             self.updateActiveBubble(text: transcript, speaker: self.activeBubbleSpeaker, isFinal: true)
+        }
+    }
+    
+    func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // 1200ms of silence = end of sentence → seal, next speech = new bubble
             self.sealActiveBubble()
-            
-            self.logger.log(
-                event: "transcript_speech_final",
-                layer: "transcript",
-                details: ["text": String(transcript.prefix(50))]
-            )
         }
     }
     
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error) {
-        logger.log(
-            event: "transcript_error",
-            layer: "transcript",
-            details: ["error": error.localizedDescription]
-        )
+        logger.log(event: "transcript_error", layer: "transcript",
+                   details: ["error": error.localizedDescription])
     }
     
     func deepgramClientDidConnect(_ client: DeepgramClient) {

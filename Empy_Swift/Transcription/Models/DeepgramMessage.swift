@@ -9,11 +9,19 @@
 import Foundation
 
 /// Deepgram transcript result (inbound message)
+/// JSON uses snake_case: is_final, speech_final — mapped via CodingKeys
 struct DeepgramTranscriptResult: Codable {
     let type: String?
     let channel: Channel?
     let isFinal: Bool?
     let speechFinal: Bool?
+    
+    enum CodingKeys: String, CodingKey {
+        case type
+        case channel
+        case isFinal = "is_final"
+        case speechFinal = "speech_final"
+    }
     
     struct Channel: Codable {
         let alternatives: [Alternative]
@@ -48,6 +56,20 @@ struct DeepgramMetadata: Codable {
     }
 }
 
+/// Deepgram UtteranceEnd event — fired after utterance_end_ms of silence
+/// Signals "speaker finished a sentence" → seal the current bubble
+struct DeepgramUtteranceEnd: Codable {
+    let type: String
+    let channel: [Int]?
+    let lastWordEnd: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case type
+        case channel
+        case lastWordEnd = "last_word_end"
+    }
+}
+
 /// Deepgram error message (inbound)
 struct DeepgramError: Codable {
     let type: String
@@ -58,6 +80,7 @@ struct DeepgramError: Codable {
 /// Union type for any Deepgram response
 enum DeepgramResponse {
     case transcript(DeepgramTranscriptResult)
+    case utteranceEnd(DeepgramUtteranceEnd)
     case metadata(DeepgramMetadata)
     case error(DeepgramError)
     case unknown(String)
@@ -72,6 +95,13 @@ enum DeepgramResponse {
         if let transcript = try? JSONDecoder().decode(DeepgramTranscriptResult.self, from: data),
            transcript.type == "Results" {
             self = .transcript(transcript)
+            return
+        }
+        
+        // UtteranceEnd — "speaker finished a sentence"
+        if let ue = try? JSONDecoder().decode(DeepgramUtteranceEnd.self, from: data),
+           ue.type == "UtteranceEnd" {
+            self = .utteranceEnd(ue)
             return
         }
         

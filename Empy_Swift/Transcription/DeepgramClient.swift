@@ -20,6 +20,8 @@ protocol DeepgramClientDelegate: AnyObject {
     func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String)
     /// Deepgram speechFinal=true — speaker paused, utterance complete → seal bubble
     func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal transcript: String)
+    /// Deepgram UtteranceEnd event — 1200ms silence detected → seal bubble
+    func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient)
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error)
     func deepgramClientDidConnect(_ client: DeepgramClient)
     func deepgramClientDidDisconnect(_ client: DeepgramClient)
@@ -164,7 +166,8 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             URLQueryItem(name: "sample_rate", value: "16000"),
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "interim_results", value: "true"),
-            URLQueryItem(name: "utterance_end_ms", value: "1000"),
+            URLQueryItem(name: "utterance_end_ms", value: "1200"),
+            URLQueryItem(name: "vad_events", value: "true"),
             // Pass API key as query param — URLSessionWebSocketTask can strip
             // custom headers during the HTTP→WS upgrade handshake
             URLQueryItem(name: "token", value: AppConfig.deepgramApiKey)
@@ -229,6 +232,11 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
         switch response {
         case .transcript(let result):
             handleTranscriptResult(result)
+            
+        case .utteranceEnd:
+            print("🔔 UTTERANCE_END received → sealing bubble")
+            logger.log(event: "deepgram_utterance_end", layer: "transcription")
+            delegate?.deepgramClientDidReceiveUtteranceEnd(self)
             
         case .metadata(let metadata):
             handleMetadata(metadata)
