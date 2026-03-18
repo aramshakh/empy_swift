@@ -58,23 +58,20 @@ class SystemAudioCapture: NSObject {
     /// Request screen recording permission
     /// - Returns: True if permission granted or already available
     @discardableResult
-    func requestPermission() async -> Bool {
-        if #available(macOS 14.0, *) {
-            if CGPreflightScreenCaptureAccess() {
-                return true
-            }
-            return await CGRequestScreenCaptureAccess()
-        } else {
-            // macOS 13: Permission dialog appears on first capture attempt
+    func requestPermission() -> Bool {
+        guard #available(macOS 14.0, *) else {
+            // macOS 13: permission dialog appears on first capture attempt
             return true
         }
+        if CGPreflightScreenCaptureAccess() { return true }
+        return CGRequestScreenCaptureAccess()
     }
     
     /// Start capturing system audio
     /// - Throws: Permission errors or ScreenCaptureKit errors
     func start() async throws {
         // Check permission
-        guard await requestPermission() else {
+        guard requestPermission() else {
             logger.log(event: "system_audio_permission_denied", layer: "audio")
             throw NSError(
                 domain: "SystemAudioCapture",

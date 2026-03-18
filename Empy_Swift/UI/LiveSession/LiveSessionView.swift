@@ -47,7 +47,7 @@ struct LiveSessionView: View {
                     if sessionManager.state == .recording {
                         sessionManager.pauseRecording()
                     } else {
-                        try? sessionManager.resumeRecording()
+                        sessionManager.resumeRecording()
                     }
                 }) {
                     Label(
@@ -63,7 +63,7 @@ struct LiveSessionView: View {
         }
         .onAppear {
             if sessionManager.state == .idle {
-                try? sessionManager.startRecording()
+                sessionManager.startRecording()
             }
         }
         .onDisappear {

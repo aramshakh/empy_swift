@@ -89,13 +89,7 @@ struct RecordingView: View {
     }
     
     private func startRecording() {
-        Task {
-            do {
-                try sessionManager.startRecording()
-            } catch {
-                print("Failed to start recording: \(error)")
-            }
-        }
+        sessionManager.startRecording()
     }
     
     private func stopRecording() {
@@ -223,7 +217,7 @@ struct RecordingView: View {
             
             Button {
                 if isPaused {
-                    try? sessionManager.resumeRecording()
+                    sessionManager.resumeRecording()
                 } else {
                     sessionManager.pauseRecording()
                 }
