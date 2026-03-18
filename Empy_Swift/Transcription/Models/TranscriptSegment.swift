@@ -37,6 +37,18 @@ struct TranscriptSegment: Identifiable, Equatable {
         self.timestamp = Date()
     }
     
+    /// Update in-place: reuse the same ID so ForEach doesn't re-create the row
+    init(updating existing: TranscriptSegment, text: String, confidence: Double, isFinal: Bool) {
+        self.id = existing.id
+        self.text = text
+        self.speaker = existing.speaker
+        self.startTime = existing.startTime
+        self.endTime = existing.endTime
+        self.confidence = confidence
+        self.isFinal = isFinal
+        self.timestamp = existing.timestamp
+    }
+    
     // Equatable conformance
     static func == (lhs: TranscriptSegment, rhs: TranscriptSegment) -> Bool {
         return lhs.id == rhs.id

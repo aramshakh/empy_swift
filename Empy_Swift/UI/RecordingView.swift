@@ -70,52 +70,22 @@ struct RecordingView: View {
     // MARK: - Setup & Observers
     
     private func setupObservers() {
-        // Observe transcript updates from shared TranscriptEngine
-        // Use incremental updates instead of full array replacement
+        // Mirror TranscriptEngine segments directly — accumulation logic
+        // is handled in TranscriptEngine (20s bubbles), UI just renders
         transcriptEngine.$transcriptState
             .receive(on: DispatchQueue.main)
             .sink { state in
-                updateTranscriptMessages(from: state.segments)
+                transcriptMessages = state.segments.map { segment in
+                    TranscriptMessage(
+                        id: segment.id,
+                        speaker: segment.speaker.flatMap { .participant(name: $0) } ?? .you,
+                        text: segment.text,
+                        timestamp: segment.timestamp,
+                        isFinal: segment.isFinal
+                    )
+                }
             }
             .store(in: &cancellables)
-    }
-    
-    /// Incrementally update messages (append finals, replace partial)
-    private func updateTranscriptMessages(from segments: [TranscriptSegment]) {
-        // Get existing final messages
-        let existingFinals = transcriptMessages.filter { $0.isFinal }
-        let existingFinalIds = Set(existingFinals.map { $0.id })
-        
-        // Build new array: existing finals + new finals + current partial
-        var newMessages = existingFinals
-        
-        // Add NEW finals from segments
-        let newFinals = segments.filter { $0.isFinal && !existingFinalIds.contains($0.id) }
-        for segment in newFinals {
-            let message = TranscriptMessage(
-                id: segment.id,
-                speaker: segment.speaker.flatMap { .participant(name: $0) } ?? .you,
-                text: segment.text,
-                timestamp: segment.timestamp,
-                isFinal: true
-            )
-            newMessages.append(message)
-        }
-        
-        // Add current partial (if any)
-        if let partial = segments.first(where: { !$0.isFinal }) {
-            let message = TranscriptMessage(
-                id: partial.id,
-                speaker: partial.speaker.flatMap { .participant(name: $0) } ?? .you,
-                text: partial.text,
-                timestamp: partial.timestamp,
-                isFinal: false
-            )
-            newMessages.append(message)
-        }
-        
-        // Replace array (SwiftUI sees the change)
-        transcriptMessages = newMessages
     }
     
     private func startRecording() {

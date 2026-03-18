@@ -29,6 +29,20 @@ class TranscriptEngine: ObservableObject {
     /// Last final transcript timestamp (for out-of-order protection)
     private var lastFinalTimestamp: Date?
     
+    // MARK: - 20-second bubble accumulation
+    
+    /// How long (seconds) to accumulate finals into one bubble before sealing
+    private let bubbleDuration: TimeInterval = 20.0
+    
+    /// The currently open (accumulating) bubble segment — kept for stable-ID in-place updates
+    private var activeBubble: TranscriptSegment?
+    
+    /// Text accumulated in the current bubble (finals only, no partial)
+    private var activeBubbleText: String = ""
+    
+    /// When the current bubble was first opened
+    private var bubbleStartTime: Date?
+    
     init(
         deepgramClient: DeepgramClient,
         logger: SessionLogger = .shared
@@ -62,30 +76,38 @@ class TranscriptEngine: ObservableObject {
         // Give Deepgram time to send final transcripts before disconnecting
         try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
         
-        // Convert any pending partial to final before disconnecting
-        if let lastID = lastPartialID,
-           let partialSegment = partialSegments[lastID] {
-            // Remove partial
-            transcriptState.segments.removeAll { $0.id == lastID }
-            partialSegments.removeValue(forKey: lastID)
-            
-            // Add as final
-            let finalSegment = TranscriptSegment(
-                text: partialSegment.text,
-                speaker: partialSegment.speaker,
-                startTime: partialSegment.startTime,
-                endTime: partialSegment.endTime,
-                confidence: partialSegment.confidence,
-                isFinal: true
-            )
-            transcriptState.segments.append(finalSegment)
-            lastPartialID = nil
-            
-            logger.log(
-                event: "transcript_partial_finalized_on_stop",
-                layer: "transcript",
-                details: ["text": String(partialSegment.text.prefix(50))]
-            )
+        await MainActor.run {
+            // Flush any live partial into the active bubble as a final
+            if let lastID = lastPartialID,
+               let partialSegment = partialSegments[lastID] {
+                transcriptState.segments.removeAll { $0.id == lastID }
+                partialSegments.removeValue(forKey: lastID)
+                lastPartialID = nil
+                
+                // Merge partial text into bubble
+                let merged = activeBubbleText.isEmpty
+                    ? partialSegment.text
+                    : activeBubbleText + " " + partialSegment.text
+                activeBubbleText = merged
+                
+                let sealed: TranscriptSegment
+                if let existing = activeBubble {
+                    sealed = TranscriptSegment(updating: existing, text: activeBubbleText, confidence: 1.0, isFinal: true)
+                    if let idx = transcriptState.segments.firstIndex(where: { $0.id == existing.id }) {
+                        transcriptState.segments[idx] = sealed
+                    } else {
+                        transcriptState.segments.append(sealed)
+                    }
+                } else {
+                    sealed = TranscriptSegment(text: activeBubbleText, confidence: 1.0, isFinal: true)
+                    transcriptState.segments.append(sealed)
+                }
+                activeBubble = nil
+                activeBubbleText = ""
+                bubbleStartTime = nil
+                
+                logger.log(event: "transcript_partial_finalized_on_stop", layer: "transcript")
+            }
         }
         
         deepgramClient.disconnect()
@@ -105,6 +127,9 @@ class TranscriptEngine: ObservableObject {
         partialSegments.removeAll()
         lastPartialID = nil
         lastFinalTimestamp = nil
+        activeBubble = nil
+        activeBubbleText = ""
+        bubbleStartTime = nil
         
         logger.log(event: "transcript_state_cleared", layer: "transcript")
     }
@@ -118,36 +143,31 @@ class TranscriptEngine: ObservableObject {
 // MARK: - DeepgramClientDelegate
 
 extension TranscriptEngine: DeepgramClientDelegate {
+    
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             
-            // Remove previous partial
-            if let lastID = self.lastPartialID {
-                self.partialSegments.removeValue(forKey: lastID)
-                self.transcriptState.segments.removeAll { $0.id == lastID }
+            // Remove previous partial segment from the array
+            if let oldID = self.lastPartialID {
+                self.partialSegments.removeValue(forKey: oldID)
+                self.transcriptState.segments.removeAll { $0.id == oldID }
             }
             
-            // Add new partial
+            // Show partial as: accumulatedFinalText + " " + currentPartialText
+            // This gives the user a live preview inside the current bubble
+            let previewText = self.activeBubbleText.isEmpty
+                ? transcript
+                : self.activeBubbleText + " " + transcript
+            
             let segment = TranscriptSegment(
-                text: transcript,
-                confidence: 0.0, // Partials have unknown confidence
+                text: previewText,
+                confidence: 0.0,
                 isFinal: false
             )
-            
             self.partialSegments[segment.id] = segment
             self.lastPartialID = segment.id
             self.transcriptState.segments.append(segment)
-            
-            let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
-            self.logger.log(
-                event: "transcript_partial_received",
-                layer: "transcript",
-                details: [
-                    "length": "\(transcript.count)",
-                    "words": "\(wordCount)"
-                ]
-            )
         }
     }
     
@@ -155,85 +175,67 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             
-            // Remove any partial segments (replaced by final)
-            if let lastID = self.lastPartialID {
-                self.partialSegments.removeValue(forKey: lastID)
-                self.transcriptState.segments.removeAll { $0.id == lastID }
+            // Remove the live partial preview
+            if let oldID = self.lastPartialID {
+                self.partialSegments.removeValue(forKey: oldID)
+                self.transcriptState.segments.removeAll { $0.id == oldID }
                 self.lastPartialID = nil
             }
             
-            // Split transcript into sentences for chat-like display
-            let sentences = self.splitIntoSentences(transcript)
+            let now = Date()
             
-            for sentence in sentences {
-                let segment = TranscriptSegment(
-                    text: sentence,
-                    confidence: 1.0,
-                    isFinal: true
-                )
-                self.transcriptState.segments.append(segment)
+            // Decide: add to current bubble, or seal it and open a new one
+            let shouldSeal: Bool
+            if let start = self.bubbleStartTime {
+                shouldSeal = now.timeIntervalSince(start) >= self.bubbleDuration
+            } else {
+                shouldSeal = false // no bubble open yet
             }
             
-            self.lastFinalTimestamp = Date()
+            if shouldSeal {
+                // Seal current bubble — it stays in transcriptState as a closed final segment
+                self.activeBubble = nil
+                self.activeBubbleText = ""
+                self.bubbleStartTime = nil
+            }
             
-            let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
+            // Append this final to the active bubble text
+            if self.activeBubbleText.isEmpty {
+                self.activeBubbleText = transcript
+            } else {
+                self.activeBubbleText += " " + transcript
+            }
+            
+            if let existing = self.activeBubble {
+                // Update existing bubble in-place using same stable ID — no ForEach flicker
+                let updated = TranscriptSegment(updating: existing, text: self.activeBubbleText, confidence: 1.0, isFinal: true)
+                if let idx = self.transcriptState.segments.firstIndex(where: { $0.id == existing.id }) {
+                    self.transcriptState.segments[idx] = updated
+                } else {
+                    self.transcriptState.segments.append(updated)
+                }
+                self.activeBubble = updated
+            } else {
+                // Open a new bubble
+                let newBubble = TranscriptSegment(text: self.activeBubbleText, confidence: 1.0, isFinal: true)
+                self.activeBubble = newBubble
+                self.bubbleStartTime = now
+                self.transcriptState.segments.append(newBubble)
+            }
+            
+            self.lastFinalTimestamp = now
+            
             self.logger.log(
                 event: "transcript_final_received",
                 layer: "transcript",
                 details: [
                     "text": String(transcript.prefix(50)),
-                    "word_count": "\(wordCount)",
-                    "sentences": "\(sentences.count)",
-                    "total_words": "\(self.transcriptState.wordCount)"
+                    "bubble_age": self.bubbleStartTime.map { String(format: "%.1fs", now.timeIntervalSince($0)) } ?? "new"
                 ]
             )
         }
-    }
-    
-    /// Split text into sentences for better chat-like display
-    private func splitIntoSentences(_ text: String) -> [String] {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-        
-        // Simple sentence splitting on . ! ? followed by space or end
-        let pattern = "([.!?]+\\s+|[.!?]+$)"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return [trimmed]
-        }
-        
-        let nsString = trimmed as NSString
-        let matches = regex.matches(in: trimmed, range: NSRange(location: 0, length: nsString.length))
-        
-        guard !matches.isEmpty else {
-            // No sentence boundaries found, return as single sentence
-            return [trimmed]
-        }
-        
-        var sentences: [String] = []
-        var lastEnd = 0
-        
-        for match in matches {
-            let sentenceRange = NSRange(location: lastEnd, length: match.range.location + match.range.length - lastEnd)
-            let sentence = nsString.substring(with: sentenceRange)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sentence.isEmpty {
-                sentences.append(sentence)
-            }
-            lastEnd = match.range.location + match.range.length
-        }
-        
-        // Add remaining text if any
-        if lastEnd < nsString.length {
-            let remaining = nsString.substring(from: lastEnd)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !remaining.isEmpty {
-                sentences.append(remaining)
-            }
-        }
-        
-        return sentences.isEmpty ? [trimmed] : sentences
     }
     
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error) {
