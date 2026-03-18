@@ -46,6 +46,10 @@ struct RecordingView: View {
             .padding(EmpySpacing.lg)
         }
         .onAppear {
+            // Clear local state so a new session starts clean
+            transcriptMessages = []
+            coachCards = []
+            isPaused = false
             setupObservers()
             startRecording()
             
@@ -56,27 +60,52 @@ struct RecordingView: View {
         }
         .onDisappear {
             stopRecording()
+            cancellables.removeAll()
         }
     }
     
     // MARK: - Setup & Observers
     
     private func setupObservers() {
-        // Observe transcript updates from shared TranscriptEngine
         transcriptEngine.$transcriptState
             .receive(on: DispatchQueue.main)
             .sink { state in
-                transcriptMessages = state.segments.map { segment in
-                    TranscriptMessage(
-                        id: segment.id,
-                        speaker: segment.speaker == "other" ? .participant(name: "Other") : .you,
-                        text: segment.text,
-                        timestamp: segment.timestamp,
-                        isFinal: segment.isFinal
-                    )
-                }
+                updateTranscriptMessages(from: state.segments)
             }
             .store(in: &cancellables)
+    }
+    
+    /// Incrementally update messages: preserve existing finals, replace partial only.
+    /// This prevents the "words overwrite" flicker caused by full-array replacement.
+    private func updateTranscriptMessages(from segments: [TranscriptSegment]) {
+        let existingFinals = transcriptMessages.filter { $0.isFinal }
+        let existingFinalIds = Set(existingFinals.map { $0.id })
+        
+        var newMessages = existingFinals
+        
+        // Append new finals not yet in our list
+        for segment in segments where segment.isFinal && !existingFinalIds.contains(segment.id) {
+            newMessages.append(TranscriptMessage(
+                id: segment.id,
+                speaker: segment.speaker == "other" ? .participant(name: "Other") : .you,
+                text: segment.text,
+                timestamp: segment.timestamp,
+                isFinal: true
+            ))
+        }
+        
+        // Append the current partial (if any)
+        if let partial = segments.first(where: { !$0.isFinal }) {
+            newMessages.append(TranscriptMessage(
+                id: partial.id,
+                speaker: partial.speaker == "other" ? .participant(name: "Other") : .you,
+                text: partial.text,
+                timestamp: partial.timestamp,
+                isFinal: false
+            ))
+        }
+        
+        transcriptMessages = newMessages
     }
     
     private func startRecording() {

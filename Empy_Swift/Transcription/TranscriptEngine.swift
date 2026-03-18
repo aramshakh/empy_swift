@@ -142,23 +142,26 @@ extension TranscriptEngine: DeepgramClientDelegate {
             return
         }
         
-        // Remove previous partial
-        if let lastID = lastPartialID {
-            partialSegments.removeValue(forKey: lastID)
-            transcriptState.segments.removeAll { $0.id == lastID }
-        }
-        
-        // Add new partial
         let segment = TranscriptSegment(
             text: transcript,
             speaker: speaker,
-            confidence: 0.0, // Partials have unknown confidence
+            confidence: 0.0,
             isFinal: false
         )
         
+        let prevID = lastPartialID
         partialSegments[segment.id] = segment
         lastPartialID = segment.id
-        transcriptState.segments.append(segment)
+        
+        // Mutate @Published on main thread to avoid runtime warnings
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let oldID = prevID {
+                self.partialSegments.removeValue(forKey: oldID)
+                self.transcriptState.segments.removeAll { $0.id == oldID }
+            }
+            self.transcriptState.segments.append(segment)
+        }
         
         let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
         logger.log(
@@ -174,23 +177,26 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String, speaker: String?) {
         guard !transcript.isEmpty else { return }
         
-        // Remove any partial segments (replaced by final)
-        if let lastID = lastPartialID {
-            partialSegments.removeValue(forKey: lastID)
-            transcriptState.segments.removeAll { $0.id == lastID }
-            lastPartialID = nil
-        }
-        
-        // Add final segment
         let segment = TranscriptSegment(
             text: transcript,
             speaker: speaker,
-            confidence: 1.0, // Finals are high confidence
+            confidence: 1.0,
             isFinal: true
         )
         
-        transcriptState.segments.append(segment)
+        let prevPartialID = lastPartialID
+        lastPartialID = nil
         lastFinalTimestamp = Date()
+        
+        // Mutate @Published on main thread to avoid runtime warnings
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let oldID = prevPartialID {
+                self.partialSegments.removeValue(forKey: oldID)
+                self.transcriptState.segments.removeAll { $0.id == oldID }
+            }
+            self.transcriptState.segments.append(segment)
+        }
         
         let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
         logger.log(
