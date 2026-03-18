@@ -78,7 +78,12 @@ class DualStreamManager: ObservableObject {
     
     /// Start system audio capture in the background.
     /// Non-critical — failure is logged and ignored.
+    /// Delayed by 1s to let AVAudioEngine fully initialise before SCStream
+    /// touches the audio server (prevents 'nope'/kAudioUnitErr_FormatNotSupported).
     func startSystemAudioIfAvailable() async {
+        // Give AVAudioEngine 1 second to stabilise before SCStream starts
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        
         do {
             try await systemAudioCapture.start()
             await MainActor.run { self.isSystemCapturing = true }
