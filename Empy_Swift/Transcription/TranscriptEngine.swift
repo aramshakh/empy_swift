@@ -55,6 +55,17 @@ class TranscriptEngine: ObservableObject {
         self.systemDelegate = sd
         micClient.delegate    = md
         systemClient.delegate = sd
+
+        // System stream uses Deepgram diarization to separate speakers in the video/call.
+        // Speaker IDs from Deepgram (0, 1, 2…) map to stable display labels.
+        // The mic stream has no resolver — it always goes to "you" via MicDelegate.
+        systemClient.useDiarization = true
+        // No maxSpeakers limit — calls can have 3-4+ participants and each should
+        // get their own bubble. Speaker IDs from Deepgram are stable within a session.
+        systemClient.speakerResolver = { speakerId in
+            guard let id = speakerId else { return "Other" }
+            return "Speaker \(id)"
+        }
     }
 
     /// Convenience init for single-stream / backwards compat
@@ -113,6 +124,14 @@ class TranscriptEngine: ObservableObject {
     }
 
     func applyFinal(_ text: String, speaker: String) {
+        // If a different system speaker has an open bubble, seal it first.
+        // This handles mid-stream speaker switches (e.g. Speaker 0 → Speaker 1)
+        // without waiting for UtteranceEnd.
+        if speaker != "you" {
+            for openSpeaker in activeBubbles.keys where openSpeaker != speaker && openSpeaker != "you" {
+                sealBubble(for: openSpeaker)
+            }
+        }
         let confirmed = confirmedTexts[speaker] ?? ""
         confirmedTexts[speaker] = confirmed.isEmpty ? text : confirmed + " " + text
         writeToBubble(text: confirmedTexts[speaker]!, isFinal: true, speaker: speaker)
@@ -143,6 +162,14 @@ class TranscriptEngine: ObservableObject {
 
     private func sealAll() {
         for speaker in activeBubbles.keys {
+            sealBubble(for: speaker)
+        }
+    }
+
+    /// Seal all open bubbles except "you" — used by UtteranceEnd on the system stream
+    /// when we don't know which specific speaker finished.
+    func sealAllSystemBubbles() {
+        for speaker in activeBubbles.keys where speaker != "you" {
             sealBubble(for: speaker)
         }
     }
@@ -189,14 +216,15 @@ private class MicDelegate: DeepgramClientDelegate {
     weak var engine: TranscriptEngine?
     init(engine: TranscriptEngine) { self.engine = engine }
 
-    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript t: String) {
+    // Mic stream is always "you" — ignore the speaker param (no speakerResolver set)
+    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript t: String, speaker: String?) {
         DispatchQueue.main.async { self.engine?.applyPartial(t, speaker: "you") }
     }
-    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript t: String) {
+    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript t: String, speaker: String?) {
         guard !t.isEmpty else { return }
         DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: "you") }
     }
-    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal t: String) {
+    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal t: String, speaker: String?) {
         guard !t.isEmpty else { return }
         DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: "you") }
     }
@@ -219,19 +247,25 @@ private class SystemDelegate: DeepgramClientDelegate {
     weak var engine: TranscriptEngine?
     init(engine: TranscriptEngine) { self.engine = engine }
 
-    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript t: String) {
-        DispatchQueue.main.async { self.engine?.applyPartial(t, speaker: "Other") }
+    // System stream uses diarization — speaker param comes from speakerResolver,
+    // falls back to "Other" if nil (e.g. when diarize hasn't fired yet)
+    func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript t: String, speaker: String?) {
+        let label = speaker ?? "Other"
+        DispatchQueue.main.async { self.engine?.applyPartial(t, speaker: label) }
     }
-    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript t: String) {
+    func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript t: String, speaker: String?) {
         guard !t.isEmpty else { return }
-        DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: "Other") }
+        let label = speaker ?? "Other"
+        DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: label) }
     }
-    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal t: String) {
+    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal t: String, speaker: String?) {
         guard !t.isEmpty else { return }
-        DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: "Other") }
+        let label = speaker ?? "Other"
+        DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: label) }
     }
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
-        DispatchQueue.main.async { self.engine?.sealBubble(for: "Other") }
+        // UtteranceEnd doesn't carry a speaker ID — seal all open system bubbles
+        DispatchQueue.main.async { self.engine?.sealAllSystemBubbles() }
     }
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error) {
         self.engine?.logger.log(event: "system_transcript_error", layer: "transcript",

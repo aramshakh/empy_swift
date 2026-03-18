@@ -118,10 +118,19 @@ class AudioEngine: ObservableObject {
         }
         
         let inputNode = engine.inputNode
-        
+
         // Remove any stale tap before touching the node
         inputNode.removeTap(onBus: 0)
-        
+
+        // Enable voice processing (AEC) to suppress echo from speakers.
+        // This must be set BEFORE engine.start(). When active, macOS automatically
+        // subtracts system audio playback from the mic signal — preventing the
+        // user's own voice (played through speakers) from appearing in the mic stream
+        // and being double-transcribed as "Other".
+        if !inputNode.isVoiceProcessingEnabled {
+            try inputNode.setVoiceProcessingEnabled(true)
+        }
+
         // Start the engine FIRST so inputNode reflects the real hardware format
         try engine.start()
 
