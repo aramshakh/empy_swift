@@ -80,7 +80,9 @@ class DualStreamManager: ObservableObject {
     /// Non-critical — failure is logged and ignored.
     /// Delayed by 1s to let AVAudioEngine fully initialise before SCStream
     /// touches the audio server (prevents 'nope'/kAudioUnitErr_FormatNotSupported).
-    func startSystemAudioIfAvailable() async {
+    /// - Returns: `true` if system audio started successfully, `false` otherwise.
+    @discardableResult
+    func startSystemAudioIfAvailable() async -> Bool {
         // Give AVAudioEngine 1 second to stabilise before SCStream starts
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         
@@ -89,10 +91,12 @@ class DualStreamManager: ObservableObject {
             await MainActor.run { self.isSystemCapturing = true }
             logger.log(event: "system_audio_started", layer: "audio")
             print("🔊 System audio capture started")
+            return true
         } catch {
             logger.log(event: "system_audio_start_failed", layer: "audio",
                        details: ["error": error.localizedDescription])
             print("⚠️ System audio unavailable, mic-only: \(error.localizedDescription)")
+            return false
         }
     }
     

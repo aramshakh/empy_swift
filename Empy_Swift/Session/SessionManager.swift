@@ -104,16 +104,19 @@ class SessionManager: ObservableObject {
         sessionStartTime = Date()
         startTimer()
 
-        // 4. Start system audio + connect system Deepgram in background
+        // 4. Start system audio + connect system Deepgram in background.
+        // Use the return value directly — avoids a race reading the @Published property
+        // from a non-main-thread Task context.
         Task {
-            await dualStreamManager.startSystemAudioIfAvailable()
-            // Connect system Deepgram only after SCStream is running
-            if dualStreamManager.isSystemCapturing {
+            let systemStarted = await dualStreamManager.startSystemAudioIfAvailable()
+            if systemStarted {
                 do {
                     try transcriptEngine.startSystemStream()
+                    print("🔊 System Deepgram stream started")
                 } catch {
                     logger.log(event: "system_stream_connect_failed", layer: "session",
                                details: ["error": error.localizedDescription])
+                    print("⚠️ System Deepgram stream failed: \(error.localizedDescription)")
                 }
             }
         }

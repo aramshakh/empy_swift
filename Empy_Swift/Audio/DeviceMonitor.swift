@@ -83,17 +83,22 @@ class DeviceMonitor {
             ]
         )
         
-        // Detect disconnect: engine was running, now stopped
+        // Detect disconnect: engine was running, now stopped (e.g. device pulled)
         if wasRunning && !isCurrentlyRunning {
             logger.log(event: "mic_disconnected", layer: "audio")
             wasRunning = false
             delegate?.deviceDidDisconnect()
         }
-        // Detect reconnect: engine was stopped, device is now available
-        else if !wasRunning && format.channelCount > 0 {
+        // Detect reconnect: engine had stopped AND is now also not running (it won't
+        // auto-restart), but a real input device is present.
+        // We intentionally do NOT treat a format-change notification (where the engine
+        // is still running) as a reconnect — that's what SCStream start triggers.
+        else if !wasRunning && !isCurrentlyRunning && format.channelCount > 0 {
             logger.log(event: "mic_reconnected", layer: "audio")
             delegate?.deviceDidReconnect()
         }
+        // If engine is still running (e.g. SCStream changed the audio graph but the
+        // engine kept going), just update wasRunning and do nothing else.
         
         // Update state for next comparison
         wasRunning = isCurrentlyRunning
