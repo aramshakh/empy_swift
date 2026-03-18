@@ -25,6 +25,8 @@ jobs:
         xcodebuild -project Empy_Swift.xcodeproj \
                    -scheme Empy_Swift \
                    -destination 'platform=macOS' \
+                   CODE_SIGN_IDENTITY="" \
+                   CODE_SIGNING_REQUIRED=NO \
                    clean build
     
     - name: SwiftLint
