@@ -170,7 +170,6 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            print("🟡 P confirmed=[\(self.confirmedText)] partial=[\(transcript)]")
             self.applyPartial(transcript)
         }
     }
@@ -179,7 +178,6 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            print("🟠 F confirmed=[\(self.confirmedText)] final=[\(transcript)]")
             self.applyFinal(transcript)
         }
     }
@@ -188,7 +186,6 @@ extension TranscriptEngine: DeepgramClientDelegate {
         guard !transcript.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            print("🟢 SF confirmed=[\(self.confirmedText)] speechFinal=[\(transcript)]")
             self.applyFinal(transcript)
         }
     }
@@ -196,7 +193,6 @@ extension TranscriptEngine: DeepgramClientDelegate {
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            print("🔔 UE → sealing. confirmedText=[\(self.confirmedText)]")
             self.sealActiveBubble()
         }
     }

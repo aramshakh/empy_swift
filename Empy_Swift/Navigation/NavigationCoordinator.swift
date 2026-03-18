@@ -13,51 +13,44 @@ import Combine
 enum AppScreen: Hashable {
     case setup
     case recording
-    case results(transcript: String)
+    case results(messages: [TranscriptMessage])
 }
 
 /// Manages app navigation state
 class NavigationCoordinator: ObservableObject {
-    /// Navigation path (SwiftUI NavigationStack)
     @Published var path: [AppScreen] = []
     
-    /// Current screen (computed)
     var currentScreen: AppScreen {
         path.last ?? .setup
     }
     
     // MARK: - Navigation Actions
     
-    /// Navigate to a screen
     func navigate(to screen: AppScreen) {
         path.append(screen)
     }
     
-    /// Go back one screen
     func goBack() {
         guard !path.isEmpty else { return }
         path.removeLast()
     }
     
-    /// Reset to root (setup screen)
     func reset() {
         path.removeAll()
     }
     
     // MARK: - Session Flow Helpers
     
-    /// Start recording session
     func startRecording() {
         navigate(to: .recording)
     }
     
-    /// End recording, show results
-    func endRecording(transcript: String) {
-        navigate(to: .results(transcript: transcript))
+    /// End recording — pass the full dialogue as structured messages
+    func endRecording(messages: [TranscriptMessage]) {
+        navigate(to: .results(messages: messages))
     }
     
-    /// Start new session (from results)
     func startNewSession() {
-        reset() // Back to setup
+        reset()
     }
 }

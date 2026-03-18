@@ -188,13 +188,12 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                // Snapshot transcript BEFORE stopping — stopRecording() disconnects
-                // Deepgram and pending async segment mutations may not have fired yet
-                let finalTranscript = transcriptEngine.transcriptState.fullText
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                // Snapshot final messages BEFORE stopping — async mutations may
+                // not have fired yet after disconnect
+                let finalMessages = transcriptMessages.filter { $0.isFinal }
                 sessionManager.stopRecording()
                 coordinator.endRecording(
-                    transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
+                    messages: finalMessages
                 )
             } label: {
                 HStack {

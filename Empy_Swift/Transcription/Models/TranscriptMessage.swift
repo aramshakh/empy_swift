@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents a single message in the conversation transcript
-struct TranscriptMessage: Identifiable {
+struct TranscriptMessage: Identifiable, Hashable {
     let id: UUID
     let speaker: Speaker
     let text: String
@@ -31,7 +31,7 @@ struct TranscriptMessage: Identifiable {
 }
 
 /// Speaker in a conversation
-enum Speaker: Equatable {
+enum Speaker: Equatable, Hashable {
     case you
     case participant(name: String)
 }

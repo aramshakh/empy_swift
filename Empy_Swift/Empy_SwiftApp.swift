@@ -27,8 +27,8 @@ struct Empy_SwiftApp: App {
                             SetupView()
                         case .recording:
                             RecordingView()
-                        case .results(let transcript):
-                            ResultsView(transcript: transcript)
+                        case .results(let messages):
+                            ResultsView(messages: messages)
                         }
                     }
             }
