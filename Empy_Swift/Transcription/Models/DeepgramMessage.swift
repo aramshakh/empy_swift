@@ -38,6 +38,7 @@ struct DeepgramTranscriptResult: Codable {
         let start: Double
         let end: Double
         let confidence: Double
+        let speaker: Int?  // Deepgram diarization: speaker ID (0, 1, 2...)
     }
 }
 

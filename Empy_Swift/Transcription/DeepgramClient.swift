@@ -168,6 +168,7 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             URLQueryItem(name: "interim_results", value: "true"),
             URLQueryItem(name: "utterance_end_ms", value: "1200"),
             URLQueryItem(name: "vad_events", value: "true"),
+            URLQueryItem(name: "diarize", value: "true"),
             // Pass API key as query param — URLSessionWebSocketTask can strip
             // custom headers during the HTTP→WS upgrade handshake
             URLQueryItem(name: "token", value: AppConfig.deepgramApiKey)
@@ -259,8 +260,13 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             return
         }
         
-        let transcript = alternative.transcript
+        var transcript = alternative.transcript
         guard !transcript.isEmpty else { return }
+        
+        // Diarization: prepend speaker label if available
+        if let words = alternative.words, let firstWord = words.first, let speakerId = firstWord.speaker {
+            transcript = "[Speaker \(speakerId)] \(transcript)"
+        }
         
         // First successful transcript confirms stream is healthy
         if !isConnected {
