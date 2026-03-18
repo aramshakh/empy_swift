@@ -143,7 +143,7 @@ struct RecordingView: View {
             } label: {
                 HStack(spacing: EmpySpacing.xs) {
                     Image(systemName: "gearshape")
-                    Text("Audio")
+                    Text("Settings")
                         .font(.empyCaption)
                 }
                 .foregroundColor(.empySecondaryText)
