@@ -158,7 +158,8 @@ struct RecordingView: View {
     private func transcriptAreaView() -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: EmpySpacing.sm) {
+                // Alignment is handled inside each TranscriptMessageView (iMessage style)
+                LazyVStack(spacing: EmpySpacing.xs) {
                     ForEach(transcriptMessages) { message in
                         TranscriptMessageView(message: message)
                             .id(message.id)
@@ -167,11 +168,16 @@ struct RecordingView: View {
                 .padding(EmpySpacing.md)
             }
             .onChange(of: transcriptMessages.count) { _ in
-                // Auto-scroll to bottom when new message arrives
                 if let lastMessage = transcriptMessages.last {
-                    withAnimation {
+                    withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
+                }
+            }
+            // Also scroll when the last bubble's text updates (partial growing)
+            .onChange(of: transcriptMessages.last?.text) { _ in
+                if let lastMessage = transcriptMessages.last {
+                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
                 }
             }
         }

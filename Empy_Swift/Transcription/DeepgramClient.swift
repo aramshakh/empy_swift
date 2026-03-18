@@ -14,8 +14,12 @@ extension Notification.Name {
 
 /// Delegate protocol for Deepgram transcription events
 protocol DeepgramClientDelegate: AnyObject {
+    /// Deepgram interim result — text still being refined
     func deepgramClient(_ client: DeepgramClient, didReceivePartialTranscript transcript: String)
+    /// Deepgram isFinal=true — text confirmed for this utterance chunk
     func deepgramClient(_ client: DeepgramClient, didReceiveFinalTranscript transcript: String)
+    /// Deepgram speechFinal=true — speaker paused, utterance complete → seal bubble
+    func deepgramClient(_ client: DeepgramClient, didReceiveSpeechFinal transcript: String)
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error)
     func deepgramClientDidConnect(_ client: DeepgramClient)
     func deepgramClientDidDisconnect(_ client: DeepgramClient)
@@ -174,7 +178,7 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             queryItems.append(URLQueryItem(name: "endpointing", value: "100"))
         } else {
             // Default: no language param, Deepgram auto-detects
-            queryItems.append(URLQueryItem(name: "endpointing", value: "true"))
+            queryItems.append(URLQueryItem(name: "endpointing", value: "300"))
         }
         
         components.queryItems = queryItems
@@ -260,8 +264,18 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             delegate?.deepgramClientDidConnect(self)
         }
         
-        // Emit partial or final transcript
-        if result.isFinal == true || result.speechFinal == true {
+        // Route to the right delegate method based on Deepgram flags:
+        //   speechFinal=true  → speaker paused (utterance complete) → seal bubble
+        //   isFinal=true only → chunk confirmed but speaker may still be talking
+        //   neither           → interim/partial (still being refined)
+        if result.speechFinal == true {
+            logger.log(
+                event: "deepgram_speech_final",
+                layer: "transcription",
+                details: ["text": String(transcript.prefix(50))]
+            )
+            delegate?.deepgramClient(self, didReceiveSpeechFinal: transcript)
+        } else if result.isFinal == true {
             logger.log(
                 event: "deepgram_final_transcript",
                 layer: "transcription",
