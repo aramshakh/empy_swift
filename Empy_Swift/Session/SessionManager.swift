@@ -84,39 +84,38 @@ class SessionManager: ObservableObject {
         }
         logger.log(event: "session_start", layer: "session")
         
-        // 1. Wire DualStreamManager → DeepgramClient
-        // Microphone stream only — system audio uses a separate Deepgram
-        // session with different params (48kHz stereo) and is not yet wired.
-        // Sending system audio into the mic stream (16kHz mono) breaks transcription.
+        // Wire mic chunks → Deepgram
         dualStreamManager.onMicChunk = { [weak self] chunk in
             self?.deepgramClient.send(audioData: chunk.pcmData)
         }
         
-        // 2. Start dual audio capture (async)
+        // 1. Start microphone synchronously — no waiting for system audio
+        do {
+            try dualStreamManager.startMicOnly()
+        } catch {
+            logger.log(event: "session_start_failed", layer: "session",
+                       details: ["error": error.localizedDescription])
+            return
+        }
+        
+        // 2. Connect Deepgram immediately after mic is running
+        do {
+            try transcriptEngine.startSession()
+        } catch {
+            logger.log(event: "session_transcription_start_failed", layer: "session",
+                       details: ["error": error.localizedDescription])
+            dualStreamManager.stopMic()
+            return
+        }
+        
+        // 3. Update UI state
+        state = .recording
+        sessionStartTime = Date()
+        startTimer()
+        
+        // 4. Start system audio capture in background (non-blocking, non-critical)
         Task {
-            do {
-                try await dualStreamManager.start()
-                
-                // 3. Connect transcription after audio is flowing
-                try transcriptEngine.startSession()
-                
-                // 4. Update state
-                await MainActor.run {
-                    state = .recording
-                    sessionStartTime = Date()
-                    startTimer()
-                }
-            } catch {
-                logger.log(
-                    event: "session_start_failed",
-                    layer: "session",
-                    details: ["error": error.localizedDescription]
-                )
-                
-                await MainActor.run {
-                    state = .idle
-                }
-            }
+            await dualStreamManager.startSystemAudioIfAvailable()
         }
     }
     
@@ -154,20 +153,14 @@ class SessionManager: ObservableObject {
     func resumeRecording() {
         logger.log(event: "session_resume", layer: "session")
         
-        Task {
-            do {
-                try await dualStreamManager.start()
-                await MainActor.run {
-                    state = .recording
-                    startTimer()
-                }
-            } catch {
-                logger.log(
-                    event: "session_resume_failed",
-                    layer: "session",
-                    details: ["error": error.localizedDescription]
-                )
-            }
+        do {
+            try dualStreamManager.startMicOnly()
+            state = .recording
+            startTimer()
+            Task { await dualStreamManager.startSystemAudioIfAvailable() }
+        } catch {
+            logger.log(event: "session_resume_failed", layer: "session",
+                       details: ["error": error.localizedDescription])
         }
     }
     

@@ -56,59 +56,50 @@ class DualStreamManager: ObservableObject {
             .assign(to: &$isMicCapturing)
     }
     
-    /// Start both audio streams
-    /// - Throws: Permission or engine errors
-    func start() async throws {
-        logger.log(event: "dual_stream_start", layer: "audio")
+    /// Start microphone only (synchronous, fast path).
+    /// Call this first so Deepgram can connect immediately.
+    /// - Throws: Permission or AVAudioEngine errors
+    func startMicOnly() throws {
+        logger.log(event: "mic_stream_start", layer: "audio")
         
-        // Wire microphone callback
         audioEngine.onChunk = { [weak self] chunk in
             self?.onMicChunk?(chunk)
         }
         
-        // Start microphone capture
         try audioEngine.start()
-        
-        // Start system audio capture
+        logger.log(event: "mic_stream_started", layer: "audio")
+        print("🎙️ Mic capture started")
+    }
+    
+    /// Stop microphone (synchronous).
+    func stopMic() {
+        audioEngine.stop()
+    }
+    
+    /// Start system audio capture in the background.
+    /// Non-critical — failure is logged and ignored.
+    func startSystemAudioIfAvailable() async {
         do {
             try await systemAudioCapture.start()
-            await MainActor.run {
-                self.isSystemCapturing = true
-            }
+            await MainActor.run { self.isSystemCapturing = true }
+            logger.log(event: "system_audio_started", layer: "audio")
+            print("🔊 System audio capture started")
         } catch {
-            logger.log(
-                event: "system_audio_start_failed",
-                layer: "audio",
-                details: ["error": error.localizedDescription]
-            )
-            // Continue with mic-only capture
-            print("⚠️ System audio unavailable, continuing with mic only: \(error)")
+            logger.log(event: "system_audio_start_failed", layer: "audio",
+                       details: ["error": error.localizedDescription])
+            print("⚠️ System audio unavailable, mic-only: \(error.localizedDescription)")
         }
-        
-        logger.log(
-            event: "dual_stream_started",
-            layer: "audio",
-            details: [
-                "mic_active": "\(isMicCapturing)",
-                "system_active": "\(isSystemCapturing)"
-            ]
-        )
     }
     
     /// Stop both audio streams
     func stop() async {
         logger.log(event: "dual_stream_stop", layer: "audio")
         
-        // Stop microphone
         audioEngine.stop()
         
-        // Stop system audio
         await systemAudioCapture.stop()
-        await MainActor.run {
-            self.isSystemCapturing = false
-        }
+        await MainActor.run { self.isSystemCapturing = false }
         
-        // Reset sequence counters
         micSeqId = 0
         systemSeqId = 0
         
