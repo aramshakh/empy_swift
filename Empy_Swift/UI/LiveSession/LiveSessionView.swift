@@ -35,7 +35,9 @@ struct LiveSessionView: View {
             // MARK: - Controls
             HStack(spacing: 16) {
                 Button(action: {
-                    sessionManager.stopRecording()
+                    Task {
+                        await sessionManager.stopRecording()
+                    }
                 }) {
                     Label("Stop", systemImage: "stop.fill")
                         .frame(width: 120)
@@ -63,12 +65,16 @@ struct LiveSessionView: View {
         }
         .onAppear {
             if sessionManager.state == .idle {
-                try? sessionManager.startRecording()
+                Task {
+                    try? await sessionManager.startRecording()
+                }
             }
         }
         .onDisappear {
             if sessionManager.state == .recording {
-                sessionManager.stopRecording()
+                Task {
+                    await sessionManager.stopRecording()
+                }
             }
         }
     }

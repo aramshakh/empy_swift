@@ -113,7 +113,7 @@ struct RecordingView: View {
     private func startRecording() {
         Task {
             do {
-                try sessionManager.startRecording()
+                try await sessionManager.startRecording()
             } catch {
                 print("Failed to start recording: \(error)")
             }
@@ -121,7 +121,9 @@ struct RecordingView: View {
     }
     
     private func stopRecording() {
-        sessionManager.stopRecording()
+        Task {
+            await sessionManager.stopRecording()
+        }
     }
     
     // MARK: - Talk Ratio Calculation
@@ -204,12 +206,14 @@ struct RecordingView: View {
     private func controlBarView() -> some View {
         HStack(spacing: EmpySpacing.md) {
             Button {
-                sessionManager.stopRecording()
-                let finalTranscript = transcriptEngine.transcriptState.fullText
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                coordinator.endRecording(
-                    transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
-                )
+                Task {
+                    await sessionManager.stopRecording()
+                    let finalTranscript = transcriptEngine.transcriptState.fullText
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    coordinator.endRecording(
+                        transcript: finalTranscript.isEmpty ? "No transcript captured" : finalTranscript
+                    )
+                }
             } label: {
                 HStack {
                     Image(systemName: "stop.fill")
