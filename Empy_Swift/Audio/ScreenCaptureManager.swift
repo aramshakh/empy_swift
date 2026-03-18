@@ -5,7 +5,6 @@ import os.log
 
 /// Manages system audio capture via ScreenCaptureKit
 /// Ported from empy-trone/Recorder.swift lines 601-726
-@Observable
 final class ScreenCaptureManager: NSObject {
     // MARK: - Properties
     

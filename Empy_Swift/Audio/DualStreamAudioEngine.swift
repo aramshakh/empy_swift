@@ -5,7 +5,6 @@ import os.log
 
 /// Dual-stream audio engine for capturing microphone + system audio separately
 /// Ported from empy-trone/Recorder.swift lines 388-423 + 250-276
-@Observable
 final class DualStreamAudioEngine {
     // MARK: - Properties
     
