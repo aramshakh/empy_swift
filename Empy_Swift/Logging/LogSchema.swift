@@ -12,7 +12,7 @@ import Foundation
 ///
 /// Each log event captures detailed information about system events across
 /// different layers (audio, transcription, session, ui) for debugging and monitoring.
-struct LogEvent: Codable {
+struct LogEvent: Codable, Sendable {
     /// Unique identifier for the current session
     let sessionId: String
     
@@ -54,7 +54,7 @@ struct LogEvent: Codable {
         sourceFile: String = #file,
         seqId: UInt64? = nil,
         tMonotonic: Int64,
-        tWall: String = ISO8601DateFormatter().string(from: Date()),
+        tWall: String,
         bytes: Int? = nil,
         durationMs: Int? = nil,
         state: String? = nil,
