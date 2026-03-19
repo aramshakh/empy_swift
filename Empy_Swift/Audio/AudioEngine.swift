@@ -25,8 +25,8 @@ class AudioEngine: ObservableObject {
     /// Callback invoked when an audio chunk is ready
     var onChunk: ((AudioChunk) -> Void)?
     
-    /// AVAudioEngine instance
-    private let engine = AVAudioEngine()
+    /// AVAudioEngine instance (exposed for ConditionalAEC access)
+    let engine = AVAudioEngine()
     
     /// Chunk emitter for buffering and emitting audio chunks
     private var chunkEmitter: ChunkEmitter?

@@ -34,6 +34,7 @@ class DualStreamManager: ObservableObject {
     private let audioEngine: AudioEngine
     private let systemAudioCapture: SystemAudioCapture
     private let logger: SessionLogger
+    private var conditionalAEC: ConditionalAEC?
     
     // Sequence counters
     private var micSeqId: UInt64 = 0
@@ -54,6 +55,9 @@ class DualStreamManager: ObservableObject {
         // Observe engine state
         audioEngine.$isCapturing
             .assign(to: &$isMicCapturing)
+        
+        // Setup conditional AEC (will be initialized after engine starts)
+        conditionalAEC = nil  // Created lazily in startMicOnly()
     }
     
     /// Set the preferred input device. Must be called before startMicOnly().
@@ -72,6 +76,18 @@ class DualStreamManager: ObservableObject {
         }
         
         try audioEngine.start()
+        
+        // Initialize conditional AEC after engine starts
+        if conditionalAEC == nil {
+            conditionalAEC = ConditionalAEC(
+                engine: audioEngine.engine,
+                logger: logger
+            )
+        }
+        
+        // Enable AEC in mic-only mode (system audio not started yet)
+        conditionalAEC?.update(systemAudioActive: false)
+        
         logger.log(event: "mic_stream_started", layer: "audio")
         print("🎙️ Mic capture started")
     }
@@ -93,7 +109,11 @@ class DualStreamManager: ObservableObject {
         
         do {
             try await systemAudioCapture.start()
-            await MainActor.run { self.isSystemCapturing = true }
+            await MainActor.run {
+                self.isSystemCapturing = true
+                // Disable AEC when system audio starts capturing
+                self.conditionalAEC?.update(systemAudioActive: true)
+            }
             logger.log(event: "system_audio_started", layer: "audio")
             print("🔊 System audio capture started")
             return true
