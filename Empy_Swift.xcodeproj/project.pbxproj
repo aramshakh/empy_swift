@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0887145D2F6C04A0009FB97D /* DTLNAec256 in Frameworks */ = {isa = PBXBuildFile; productRef = 0887145C2F6C04A0009FB97D /* DTLNAec256 */; };
+		0887145F2F6C04A0009FB97D /* DTLNAecCoreML in Frameworks */ = {isa = PBXBuildFile; productRef = 0887145E2F6C04A0009FB97D /* DTLNAecCoreML */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		08BA5D612F51D1A400B5DF84 /* Empy_Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Empy_Swift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +28,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0887145F2F6C04A0009FB97D /* DTLNAecCoreML in Frameworks */,
+				0887145D2F6C04A0009FB97D /* DTLNAec256 in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +72,8 @@
 			);
 			name = Empy_Swift;
 			packageProductDependencies = (
+				0887145C2F6C04A0009FB97D /* DTLNAec256 */,
+				0887145E2F6C04A0009FB97D /* DTLNAecCoreML */,
 			);
 			productName = Empy_Swift;
 			productReference = 08BA5D612F51D1A400B5DF84 /* Empy_Swift.app */;
@@ -94,6 +103,9 @@
 			);
 			mainGroup = 08BA5D582F51D1A400B5DF84;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0887145B2F6C04A0009FB97D /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 08BA5D622F51D1A400B5DF84 /* Products */;
 			projectDirPath = "";
@@ -339,6 +351,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0887145B2F6C04A0009FB97D /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MimicScribe/dtln-aec-coreml.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0887145C2F6C04A0009FB97D /* DTLNAec256 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0887145B2F6C04A0009FB97D /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */;
+			productName = DTLNAec256;
+		};
+		0887145E2F6C04A0009FB97D /* DTLNAecCoreML */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0887145B2F6C04A0009FB97D /* XCRemoteSwiftPackageReference "dtln-aec-coreml" */;
+			productName = DTLNAecCoreML;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 08BA5D592F51D1A400B5DF84 /* Project object */;
 }

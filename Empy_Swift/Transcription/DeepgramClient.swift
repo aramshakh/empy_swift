@@ -189,7 +189,7 @@ class DeepgramClient: NSObject, URLSessionWebSocketDelegate {
             // Multi-language code-switching (e.g. English + Russian)
             // Deepgram recommends endpointing=100 for code-switching
             queryItems.append(URLQueryItem(name: "language", value: "multi"))
-            queryItems.append(URLQueryItem(name: "model", value: "nova-2"))
+            queryItems.append(URLQueryItem(name: "model", value: "nova-3"))
             queryItems.append(URLQueryItem(name: "endpointing", value: "100"))
         } else {
             // Default: no language param, Deepgram auto-detects
