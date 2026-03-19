@@ -23,6 +23,7 @@ class SessionManager: ObservableObject {
     @Published private(set) var state: SessionState = .idle
     @Published private(set) var sessionStartTime: Date?
     @Published private(set) var elapsed: TimeInterval = 0
+    @Published var chatManager = ChatManager()
 
     // Dependencies
     private let dualStreamManager: DualStreamManager
@@ -66,6 +67,10 @@ class SessionManager: ObservableObject {
             logger.startSession(id: UUID().uuidString)
         }
         logger.log(event: "session_start", layer: "session")
+        
+        // Initialize chat manager
+        let conversationId = UUID().uuidString
+        chatManager.initialize(conversationId: conversationId)
 
         // Wire mic chunks → mic Deepgram client
         dualStreamManager.onMicChunk = { [weak self] chunk in

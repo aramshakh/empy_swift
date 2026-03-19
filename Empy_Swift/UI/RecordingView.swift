@@ -213,7 +213,7 @@ struct RecordingView: View {
         case .transcript:
             transcriptAreaView()
         case .agent:
-            AgentFeedView(cards: coachCards)
+            AgentChatView(chatManager: sessionManager.chatManager)
         }
     }
 
