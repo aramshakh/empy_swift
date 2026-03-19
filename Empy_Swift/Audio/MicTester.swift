@@ -49,21 +49,23 @@ final class MicTester: ObservableObject {
         let engine = AVAudioEngine()
         recordEngine = engine
 
-        // Apply device if specified
-        if let device = device {
-            do {
-                try AudioDeviceManager.shared.setInputDevice(device, on: engine)
-            } catch {
-                print("⚠️ MicTester: failed to set input device — \(error.localizedDescription)")
-            }
-        }
-
+        // Start engine first — audioUnit is only available after engine.start()
         do {
             try engine.start()
         } catch {
             print("⚠️ MicTester: engine start failed — \(error.localizedDescription)")
             state = .idle
             return
+        }
+
+        // Apply device after engine is running so audioUnit is initialised
+        if let device = device {
+            do {
+                try AudioDeviceManager.shared.setInputDevice(device, on: engine)
+            } catch {
+                print("⚠️ MicTester: failed to set input device — \(error.localizedDescription)")
+                // Non-fatal: recording continues on system default
+            }
         }
 
         let inputFormat = engine.inputNode.outputFormat(forBus: 0)
@@ -85,9 +87,10 @@ final class MicTester: ObservableObject {
         }
 
         recordStart = Date()
-        state = .recording(progress: 0)
+        DispatchQueue.main.async { self.state = .recording(progress: 0) }
 
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // Use RunLoop.main with .common so the timer fires even during UI tracking loops
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self = self, let start = self.recordStart else { return }
             let elapsed = Date().timeIntervalSince(start)
             let progress = min(elapsed / self.recordDuration, 1.0)
@@ -96,6 +99,8 @@ final class MicTester: ObservableObject {
                 self.finishRecordingAndPlayBack()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
     }
 
     private func finishRecordingAndPlayBack() {
@@ -153,14 +158,16 @@ final class MicTester: ObservableObject {
         let totalFrames = buffers.reduce(0) { $0 + Double($1.frameLength) }
         let playbackDuration = totalFrames / format.sampleRate
 
-        state = .playing(progress: 0)
+        DispatchQueue.main.async { self.state = .playing(progress: 0) }
         let playStart = Date()
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        let playTimer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             let elapsed = Date().timeIntervalSince(playStart)
             let progress = min(elapsed / playbackDuration, 1.0)
             DispatchQueue.main.async { self.state = .playing(progress: progress) }
         }
+        RunLoop.main.add(playTimer, forMode: .common)
+        progressTimer = playTimer
 
         // Keep strong references for the duration of playback
         objc_setAssociatedObject(self, &MicTester.playbackEngineKey, engine, .OBJC_ASSOCIATION_RETAIN)
