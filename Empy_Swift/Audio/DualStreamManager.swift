@@ -45,8 +45,10 @@ class DualStreamManager: ObservableObject {
     private var micSeqId: UInt64 = 0
     private var systemSeqId: UInt64 = 0
     
+    #if canImport(DTLNAecCoreML)
     /// AEC processor (nil if package not available)
     private var aecProcessor: DTLNAecEchoProcessor?
+    #endif
     
     init(
         audioEngine: AudioEngine = AudioEngine(),
