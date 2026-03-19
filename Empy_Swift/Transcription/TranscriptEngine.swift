@@ -35,13 +35,22 @@ class TranscriptEngine: ObservableObject {
 
     // MARK: - Per-speaker bubble state (main thread only)
 
-    /// Open bubble per speaker label ("you" / "Other")
-    private var activeBubbles:  [String: TranscriptSegment] = [:]
+    /// Open bubble per speaker label ("you" / "Speaker 0" etc.)
+    var activeBubbles:  [String: TranscriptSegment] = [:]
     /// Accumulated confirmed text per speaker
     private var confirmedTexts: [String: String]            = [:]
-    /// 20s force-seal timer per speaker
+    /// 20s force-seal timer per speaker (max bubble duration)
     private var sealTimers:     [String: Timer]             = [:]
     private let maxBubbleDuration: TimeInterval = 20.0
+
+    /// Debounce timers: seal only fires after 2s silence per speaker.
+    /// Restarted every time new text arrives — prevents single-word bubbles.
+    private var sealDebounceTimers: [String: Timer] = [:]
+    private let sealDebounceInterval: TimeInterval = 2.0
+
+    /// Minimum words a bubble must have before a speaker-switch creates a new bubble.
+    /// Prevents 1-2 word orphan bubbles from diarization noise.
+    private let minWordsBeforeSplit = 4
 
     // MARK: - Init
 
@@ -112,6 +121,8 @@ class TranscriptEngine: ObservableObject {
         confirmedTexts.removeAll()
         sealTimers.values.forEach { $0.invalidate() }
         sealTimers.removeAll()
+        sealDebounceTimers.values.forEach { $0.invalidate() }
+        sealDebounceTimers.removeAll()
         logger.log(event: "transcript_state_cleared", layer: "transcript")
     }
 
@@ -124,17 +135,38 @@ class TranscriptEngine: ObservableObject {
     }
 
     func applyFinal(_ text: String, speaker: String) {
-        // If a different system speaker has an open bubble, seal it first.
-        // This handles mid-stream speaker switches (e.g. Speaker 0 → Speaker 1)
-        // without waiting for UtteranceEnd.
+        // Speaker-switch: seal the other speaker's bubble only if it has enough words.
+        // Short bubbles (< minWordsBeforeSplit words) get merged into the current speaker
+        // instead — prevents orphan 1-2 word bubbles from diarization noise.
         if speaker != "you" {
             for openSpeaker in activeBubbles.keys where openSpeaker != speaker && openSpeaker != "you" {
-                sealBubble(for: openSpeaker)
+                let wordCount = (confirmedTexts[openSpeaker] ?? "").split(separator: " ").count
+                if wordCount >= minWordsBeforeSplit {
+                    sealBubble(for: openSpeaker)
+                }
+                // else: too short — leave open, next isFinal will overwrite or extend it
             }
         }
+
         let confirmed = confirmedTexts[speaker] ?? ""
         confirmedTexts[speaker] = confirmed.isEmpty ? text : confirmed + " " + text
         writeToBubble(text: confirmedTexts[speaker]!, isFinal: true, speaker: speaker)
+
+        // Restart the debounce seal timer — if no more text arrives in 2s, seal the bubble.
+        // This replaces the "seal on UtteranceEnd" path for short utterances.
+        scheduleSealDebounce(for: speaker)
+    }
+
+    /// Schedule a debounced seal: fires 2s after the last text chunk.
+    /// Cancelled and restarted on every new applyFinal call for this speaker.
+    func scheduleSealDebounce(for speaker: String) {
+        sealDebounceTimers[speaker]?.invalidate()
+        sealDebounceTimers[speaker] = Timer.scheduledTimer(
+            withTimeInterval: sealDebounceInterval,
+            repeats: false
+        ) { [weak self] _ in
+            self?.sealBubble(for: speaker)
+        }
     }
 
     func sealBubble(for speaker: String) {
@@ -154,6 +186,8 @@ class TranscriptEngine: ObservableObject {
         confirmedTexts.removeValue(forKey: speaker)
         sealTimers[speaker]?.invalidate()
         sealTimers.removeValue(forKey: speaker)
+        sealDebounceTimers[speaker]?.invalidate()
+        sealDebounceTimers.removeValue(forKey: speaker)
 
         logger.log(event: "transcript_bubble_sealed", layer: "transcript",
                    details: ["speaker": speaker,
@@ -229,7 +263,9 @@ private class MicDelegate: DeepgramClientDelegate {
         DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: "you") }
     }
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
-        DispatchQueue.main.async { self.engine?.sealBubble(for: "you") }
+        // Use debounce instead of immediate seal — the last isFinal chunk may
+        // still be in-flight. scheduleSealDebounce will fire after 2s of silence.
+        DispatchQueue.main.async { self.engine?.scheduleSealDebounce(for: "you") }
     }
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error) {
         self.engine?.logger.log(event: "mic_transcript_error", layer: "transcript",
@@ -264,8 +300,13 @@ private class SystemDelegate: DeepgramClientDelegate {
         DispatchQueue.main.async { self.engine?.applyFinal(t, speaker: label) }
     }
     func deepgramClientDidReceiveUtteranceEnd(_ client: DeepgramClient) {
-        // UtteranceEnd doesn't carry a speaker ID — seal all open system bubbles
-        DispatchQueue.main.async { self.engine?.sealAllSystemBubbles() }
+        // UtteranceEnd doesn't carry a speaker ID — debounce-seal all open system bubbles
+        DispatchQueue.main.async {
+            guard let engine = self.engine else { return }
+            for speaker in engine.activeBubbles.keys where speaker != "you" {
+                engine.scheduleSealDebounce(for: speaker)
+            }
+        }
     }
     func deepgramClient(_ client: DeepgramClient, didEncounterError error: Error) {
         self.engine?.logger.log(event: "system_transcript_error", layer: "transcript",
