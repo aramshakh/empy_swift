@@ -4,11 +4,17 @@
 //
 //  T04: Coordinates microphone + system audio capture
 //  Provides separate callbacks for each audio source
+//  ARA-101: DTLN-aec integration for echo cancellation
 //
 
 import Foundation
 import AVFoundation
 import Combine
+
+#if canImport(DTLNAecCoreML)
+import DTLNAecCoreML
+import DTLNAec256
+#endif
 
 /// Manages dual audio streams: microphone + system audio
 /// 
@@ -39,6 +45,9 @@ class DualStreamManager: ObservableObject {
     private var micSeqId: UInt64 = 0
     private var systemSeqId: UInt64 = 0
     
+    /// AEC processor (nil if package not available)
+    private var aecProcessor: DTLNAecEchoProcessor?
+    
     init(
         audioEngine: AudioEngine = AudioEngine(),
         systemAudioCapture: SystemAudioCapture = SystemAudioCapture(),
@@ -67,8 +76,52 @@ class DualStreamManager: ObservableObject {
     func startMicOnly() throws {
         logger.log(event: "mic_stream_start", layer: "audio")
         
+        // Initialize AEC if available
+        #if canImport(DTLNAecCoreML)
+        if aecProcessor == nil {
+            aecProcessor = DTLNAecEchoProcessor(modelSize: .medium)
+            do {
+                try aecProcessor?.loadModels(from: DTLNAec256.bundle)
+                logger.log(event: "aec_loaded", layer: "audio")
+                print("🧹 AEC loaded successfully")
+            } catch {
+                logger.log(event: "aec_load_failed", layer: "audio",
+                           details: ["error": error.localizedDescription])
+                aecProcessor = nil
+                print("⚠️ AEC load failed: \(error.localizedDescription)")
+            }
+        }
+        #else
+        logger.log(event: "aec_not_available", layer: "audio")
+        print("ℹ️ AEC package not available (add dtln-aec-coreml to enable echo cancellation)")
+        #endif
+        
         audioEngine.onChunk = { [weak self] chunk in
-            self?.onMicChunk?(chunk)
+            guard let self = self else { return }
+            
+            var processedChunk = chunk
+            
+            #if canImport(DTLNAecCoreML)
+            if let aec = self.aecProcessor {
+                // Convert PCM → Float
+                let floatSamples = self.pcmDataToFloatArray(chunk.pcmData)
+                
+                // Process through AEC
+                let cleanSamples = aec.processNearEnd(floatSamples)
+                
+                // Convert back to PCM
+                let cleanPCM = self.floatArrayToPCMData(cleanSamples)
+                
+                processedChunk = AudioChunk(
+                    seqId: chunk.seqId,
+                    pcmData: cleanPCM,
+                    timestamp: chunk.timestamp,
+                    source: chunk.source
+                )
+            }
+            #endif
+            
+            self.onMicChunk?(processedChunk)
         }
         
         try audioEngine.start()
@@ -114,6 +167,13 @@ class DualStreamManager: ObservableObject {
         await systemAudioCapture.stop()
         await MainActor.run { self.isSystemCapturing = false }
         
+        #if canImport(DTLNAecCoreML)
+        if let aec = aecProcessor {
+            _ = aec.flush()
+            aec.resetStates()
+        }
+        #endif
+        
         micSeqId = 0
         systemSeqId = 0
         
@@ -124,6 +184,14 @@ class DualStreamManager: ObservableObject {
 // MARK: - SystemAudioCaptureDelegate
 extension DualStreamManager: SystemAudioCaptureDelegate {
     func systemAudioDidCapture(buffer: AVAudioPCMBuffer) {
+        // Feed to AEC as reference signal
+        #if canImport(DTLNAecCoreML)
+        if let aec = aecProcessor {
+            let samples = bufferToFloatArray(buffer)
+            aec.feedFarEnd(samples)
+        }
+        #endif
+        
         // Forward buffer to callback
         onSystemBuffer?(buffer)
     }
@@ -145,3 +213,31 @@ extension DualStreamManager: SystemAudioCaptureDelegate {
         print("⚠️ System audio capture failed, continuing with mic only")
     }
 }
+
+// MARK: - AEC Conversion Helpers
+#if canImport(DTLNAecCoreML)
+private extension DualStreamManager {
+    /// Convert AVAudioPCMBuffer to Float array for AEC
+    func bufferToFloatArray(_ buffer: AVAudioPCMBuffer) -> [Float] {
+        guard let floatData = buffer.floatChannelData else { return [] }
+        let frameLength = Int(buffer.frameLength)
+        return Array(UnsafeBufferPointer(start: floatData[0], count: frameLength))
+    }
+    
+    /// Convert PCM Int16 Data to Float array for AEC
+    func pcmDataToFloatArray(_ pcmData: Data) -> [Float] {
+        let int16Array = pcmData.withUnsafeBytes { ptr in
+            Array(ptr.bindMemory(to: Int16.self))
+        }
+        return int16Array.map { Float($0) / 32768.0 }
+    }
+    
+    /// Convert Float array back to PCM Int16 Data
+    func floatArrayToPCMData(_ floats: [Float]) -> Data {
+        let int16Array = floats.map { sample in
+            Int16(max(-32768, min(32767, sample * 32768.0)))
+        }
+        return Data(bytes: int16Array, count: int16Array.count * MemoryLayout<Int16>.size)
+    }
+}
+#endif
