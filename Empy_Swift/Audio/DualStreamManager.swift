@@ -116,7 +116,10 @@ class DualStreamManager: ObservableObject {
         
         micSeqId = 0
         systemSeqId = 0
-        
+
+        // Reset AEC LSTM state so next session starts clean
+        audioEngine.aec.reset()
+
         logger.log(event: "dual_stream_stopped", layer: "audio")
     }
 }
@@ -124,7 +127,12 @@ class DualStreamManager: ObservableObject {
 // MARK: - SystemAudioCaptureDelegate
 extension DualStreamManager: SystemAudioCaptureDelegate {
     func systemAudioDidCapture(buffer: AVAudioPCMBuffer) {
-        // Forward buffer to callback
+        // Feed system audio into AEC far-end estimator BEFORE forwarding to Deepgram.
+        // This tells the neural model "this is what's playing through the speakers"
+        // so it can subtract it from the mic signal.
+        audioEngine.feedFarEnd(buffer)
+
+        // Forward buffer to SessionManager → Deepgram system stream
         onSystemBuffer?(buffer)
     }
     

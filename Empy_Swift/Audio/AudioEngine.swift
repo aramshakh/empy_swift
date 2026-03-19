@@ -36,10 +36,22 @@ class AudioEngine: ObservableObject {
     
     /// Session logger for event tracking
     private let logger: SessionLogger
-    
+
     /// Preferred input device set by the user. Applied in setupEngine() after engine.start().
     /// If nil, AVAudioEngine uses the system default input.
     var preferredInputDevice: AudioDevice?
+
+    /// Neural AEC processor — suppresses loudspeaker echo from mic signal.
+    /// Fed with system audio (far-end) by DualStreamManager via feedFarEnd(_:).
+    let aec = AECProcessor()
+
+    /// Float32 16kHz mono format — required by DTLN AEC.
+    private let aecFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 16000,
+        channels: 1,
+        interleaved: true
+    )
 
     /// Audio format: 16kHz, mono, Int16 PCM
     private let targetFormat = AVAudioFormat(
@@ -105,6 +117,12 @@ class AudioEngine: ObservableObject {
         
         // Start device monitoring
         deviceMonitor.startMonitoring(engine: engine)
+
+        // Load AEC models in background — mic capture starts immediately,
+        // AEC activates automatically once models are ready (~200ms on Apple Silicon)
+        Task {
+            await aec.loadIfNeeded()
+        }
     }
     
     /// Setup and start the audio engine
@@ -121,15 +139,6 @@ class AudioEngine: ObservableObject {
 
         // Remove any stale tap before touching the node
         inputNode.removeTap(onBus: 0)
-
-        // Enable voice processing (AEC) to suppress echo from speakers.
-        // This must be set BEFORE engine.start(). When active, macOS automatically
-        // subtracts system audio playback from the mic signal — preventing the
-        // user's own voice (played through speakers) from appearing in the mic stream
-        // and being double-transcribed as "Other".
-        if !inputNode.isVoiceProcessingEnabled {
-            try inputNode.setVoiceProcessingEnabled(true)
-        }
 
         // Start the engine FIRST so inputNode reflects the real hardware format
         try engine.start()
@@ -172,14 +181,22 @@ class AudioEngine: ObservableObject {
         let bufferSize: AVAudioFrameCount = 1600
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, time in
             guard let self = self, let emitter = self.chunkEmitter else { return }
-            
-            guard let convertedBuffer = self.convert(buffer: buffer, to: targetFormat) else {
-                return
+
+            // If AEC is loaded: convert to Float32 16kHz → run AEC → convert back to Int16
+            // If AEC not loaded: convert directly to Int16 (passthrough)
+            let pcmData: Data?
+            if self.aec.available, let aecFmt = self.aecFormat,
+               let float32Buf = self.convertToFloat32(buffer: buffer, to: aecFmt) {
+                let rawSamples = self.float32ArrayFrom(buffer: float32Buf)
+                let cleanSamples = self.aec.processNearEnd(rawSamples)
+                pcmData = self.float32ArrayToInt16Data(cleanSamples)
+            } else {
+                guard let converted = self.convert(buffer: buffer, to: targetFormat) else { return }
+                pcmData = self.extractPCMData(from: converted)
             }
-            guard let pcmData = self.extractPCMData(from: convertedBuffer) else {
-                return
-            }
-            emitter.append(samples: pcmData)
+
+            guard let data = pcmData else { return }
+            emitter.append(samples: data)
         }
         
         DispatchQueue.main.async {
@@ -190,6 +207,31 @@ class AudioEngine: ObservableObject {
         print("✅ Audio engine started")
     }
     
+    // MARK: - AEC helpers
+
+    /// Generic AVAudioFormat converter (used for both AEC path and passthrough).
+    private func convertToFloat32(buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        return convert(buffer: buffer, to: format)
+    }
+
+    /// Extract all samples from a Float32 mono buffer into a plain Swift array.
+    private func float32ArrayFrom(buffer: AVAudioPCMBuffer) -> [Float] {
+        guard let channelData = buffer.floatChannelData else { return [] }
+        let frameCount = Int(buffer.frameLength)
+        return Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
+    }
+
+    /// Convert Float32 samples (−1…1) to interleaved Int16 PCM Data.
+    private func float32ArrayToInt16Data(_ samples: [Float]) -> Data {
+        var data = Data(capacity: samples.count * 2)
+        for sample in samples {
+            let clamped = max(-1.0, min(1.0, sample))
+            let int16 = Int16(clamped * Float(Int16.max))
+            withUnsafeBytes(of: int16.littleEndian) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
+
     /// Convert an audio buffer to the target format
     private func convert(buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         // If formats match, no conversion needed
@@ -255,6 +297,16 @@ class AudioEngine: ObservableObject {
         }
     }
     
+    /// Feed system audio (loudspeaker signal) into the AEC far-end estimator.
+    /// Called by DualStreamManager for every SCKit buffer before Deepgram send.
+    /// Must be called from any queue — AECProcessor is thread-safe on its tap queue.
+    func feedFarEnd(_ buffer: AVAudioPCMBuffer) {
+        guard aec.available, let fmt = aecFormat else { return }
+        guard let float32Buf = convertToFloat32(buffer: buffer, to: fmt) else { return }
+        let samples = float32ArrayFrom(buffer: float32Buf)
+        aec.feedFarEnd(samples)
+    }
+
     /// Stop capturing audio
     func stop() {
         deviceMonitor.stopMonitoring()
