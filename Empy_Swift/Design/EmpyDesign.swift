@@ -35,6 +35,10 @@ extension Color {
     
     // Semantic
     static let empySecondaryText = Color(red: 0.620, green: 0.620, blue: 0.640) // gray-500
+
+    // Speaker identity (used in bubbles, talk ratio, results)
+    static let empySpeakerYou   = Color(red: 0.396, green: 0.400, blue: 0.945) // indigo-500, matches empyAccent
+    static let empySpeakerOther = Color(red: 0.612, green: 0.353, blue: 0.714) // purple-500
     
     // Gradient (Background)
     static let empyGradientLight = LinearGradient(
@@ -61,7 +65,9 @@ extension Color {
 extension Font {
     // Titles
     static let empyTitle = Font.system(size: 24, weight: .semibold) // text-2xl font-semibold
-    
+    static let empyHeading = Font.system(size: 20, weight: .semibold) // text-xl font-semibold
+    static let empySubtitle = Font.system(size: 18, weight: .medium)  // text-lg font-medium
+
     // Body
     static let empyBody = Font.system(size: 16, weight: .regular)      // text-base
     static let empyBodyMedium = Font.system(size: 16, weight: .medium)

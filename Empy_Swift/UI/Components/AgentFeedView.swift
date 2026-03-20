@@ -60,10 +60,14 @@ struct AgentFeedView: View {
 private struct AgentFeedRow: View {
     let card: CoachCard
 
-    private var timeString: String {
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
-        return f.string(from: card.timestamp)
+        return f
+    }()
+
+    private var timeString: String {
+        Self.timeFormatter.string(from: card.timestamp)
     }
 
     var body: some View {

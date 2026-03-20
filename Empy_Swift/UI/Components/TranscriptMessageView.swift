@@ -57,7 +57,7 @@ struct TranscriptMessageView: View {
     }
     
     private var bubbleColor: Color {
-        isYou ? Color.blue : Color(NSColor.tertiaryLabelColor).opacity(0.15)
+        isYou ? Color.empySpeakerYou : Color(NSColor.tertiaryLabelColor).opacity(0.15)
     }
     
     private var speakerLabel: String {
@@ -67,10 +67,14 @@ struct TranscriptMessageView: View {
         }
     }
     
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
     private var timeString: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: message.timestamp)
+        Self.timeFormatter.string(from: message.timestamp)
     }
 }
 

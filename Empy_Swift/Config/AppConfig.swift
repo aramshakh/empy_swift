@@ -23,6 +23,29 @@ enum AppConfig {
         return "DEMO_KEY_REPLACE_ME"
     }
     
+    /// User ID sent to backend on conversation create.
+    /// Reads from `EMPY_USER_ID` env var, falls back to a stable device-based UUID.
+    static var backendUserId: String {
+        if let envId = ProcessInfo.processInfo.environment["EMPY_USER_ID"], !envId.isEmpty {
+            return envId
+        }
+        // Persist a stable UUID per device install
+        let key = "empy_device_user_id"
+        if let stored = UserDefaults.standard.string(forKey: key) { return stored }
+        let generated = UUID().uuidString
+        UserDefaults.standard.set(generated, forKey: key)
+        return generated
+    }
+
+    /// Backend auth token for /conversation endpoints
+    ///
+    /// Reads from `EMPY_BACKEND_TOKEN` environment variable.
+    /// Returns `nil` if not set — unauthenticated endpoints work without it.
+    static var backendToken: String? {
+        let token = ProcessInfo.processInfo.environment["EMPY_BACKEND_TOKEN"] ?? ""
+        return token.isEmpty ? nil : token
+    }
+
     /// Check if a valid Deepgram API key is configured
     ///
     /// Returns `false` if using the demo placeholder key

@@ -30,12 +30,12 @@ struct TalkRatioView: View {
                 ZStack(alignment: .leading) {
                     // Background (participant)
                     RoundedRectangle(cornerRadius: EmpyRadius.sm)
-                        .fill(Color.gray.opacity(0.2))
+                        .fill(Color.empySpeakerOther.opacity(0.25))
                         .frame(height: 8)
                     
                     // Foreground (user)
                     RoundedRectangle(cornerRadius: EmpyRadius.sm)
-                        .fill(Color.blue)
+                        .fill(Color.empySpeakerYou)
                         .frame(width: geometry.size.width * userPercentage, height: 8)
                 }
             }
@@ -45,16 +45,16 @@ struct TalkRatioView: View {
             HStack(spacing: EmpySpacing.md) {
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(Color.blue)
+                        .fill(Color.empySpeakerYou)
                         .frame(width: 8, height: 8)
                     Text("You")
                         .font(.empyCaption)
                         .foregroundColor(.secondary)
                 }
-                
+
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(Color.gray.opacity(0.2))
+                        .fill(Color.empySpeakerOther.opacity(0.5))
                         .frame(width: 8, height: 8)
                     Text("Participant")
                         .font(.empyCaption)

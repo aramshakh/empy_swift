@@ -63,24 +63,24 @@ struct ResultsView: View {
     private var transcriptColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: EmpySpacing.xxs) {
                 Text("Conversation Transcript")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                    .font(.empyHeading)
                 Text("\(messages.count) messages · \(totalWordCount) words")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.empyCaption)
+                    .foregroundColor(.empySecondaryText)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
+            .padding(.horizontal, EmpySpacing.lg)
+            .padding(.top, EmpySpacing.lg)
+            .padding(.bottom, EmpySpacing.sm)
             
             Divider()
             
             if messages.isEmpty {
                 Spacer()
                 Text("No transcript captured")
-                    .foregroundColor(.secondary)
+                    .font(.empyBody)
+                    .foregroundColor(.empySecondaryText)
                     .frame(maxWidth: .infinity)
                 Spacer()
             } else {
@@ -90,7 +90,7 @@ struct ResultsView: View {
                             ResultsMessageRow(message: message, index: index + 1)
                         }
                     }
-                    .padding(.vertical, 12)
+                    .padding(.vertical, EmpySpacing.sm)
                 }
             }
         }
@@ -101,37 +101,36 @@ struct ResultsView: View {
     
     private var statsColumn: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: EmpySpacing.lg) {
                 Text("Session Stats")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .padding(.top, 20)
+                    .font(.empySubtitle)
+                    .padding(.top, EmpySpacing.lg)
                 
                 // Talk ratio bar
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: EmpySpacing.xs) {
                     Text("Talk Ratio")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.empyCaptionSemibold)
+                        .foregroundColor(.empySecondaryText)
                         .textCase(.uppercase)
                     
                     GeometryReader { geo in
                         HStack(spacing: 2) {
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.blue)
+                                .fill(Color.empySpeakerYou)
                                 .frame(width: geo.size.width * CGFloat(youPercent) / 100)
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.purple.opacity(0.6))
+                                .fill(Color.empySpeakerOther.opacity(0.6))
                         }
                         .frame(height: 12)
                     }
                     .frame(height: 12)
-                    
+
                     HStack {
-                        Circle().fill(Color.blue).frame(width: 8, height: 8)
-                        Text("You \(youPercent)%").font(.caption)
+                        Circle().fill(Color.empySpeakerYou).frame(width: 8, height: 8)
+                        Text("You \(youPercent)%").font(.empyCaption)
                         Spacer()
-                        Circle().fill(Color.purple.opacity(0.6)).frame(width: 8, height: 8)
-                        Text("Other \(100 - youPercent)%").font(.caption)
+                        Circle().fill(Color.empySpeakerOther.opacity(0.6)).frame(width: 8, height: 8)
+                        Text("Other \(100 - youPercent)%").font(.empyCaption)
                     }
                 }
                 
@@ -158,7 +157,7 @@ struct ResultsView: View {
                 
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, EmpySpacing.md)
         }
         .background(Color(NSColor.controlBackgroundColor))
     }
@@ -166,12 +165,11 @@ struct ResultsView: View {
     private func statRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(.empyCaption)
+                .foregroundColor(.empySecondaryText)
             Spacer()
             Text(value)
-                .font(.caption)
-                .fontWeight(.semibold)
+                .font(.empyCaptionSemibold)
         }
     }
     
@@ -200,42 +198,41 @@ private struct ResultsMessageRow: View {
     private var isYou: Bool { message.speaker == .you }
     
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: EmpySpacing.sm) {
             // Message number
             Text("\(index)")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(.secondary)
+                .font(.empySmall).monospaced()
+                .foregroundColor(.empySecondaryText)
                 .frame(width: 28, alignment: .trailing)
                 .padding(.top, 3)
             
             // Speaker avatar dot
             Circle()
-                .fill(isYou ? Color.blue : Color.purple.opacity(0.7))
+                .fill(isYou ? Color.empySpeakerYou : Color.empySpeakerOther)
                 .frame(width: 8, height: 8)
                 .padding(.top, 5)
             
             // Content
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
+                HStack(spacing: EmpySpacing.xs) {
                     Text(speakerLabel)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(isYou ? .blue : .purple)
+                        .font(.empyCaptionSemibold)
+                        .foregroundColor(isYou ? .empySpeakerYou : .empySpeakerOther)
                     Text(DateFormatter.shortTime.string(from: message.timestamp))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.empyCaption)
+                        .foregroundColor(.empySecondaryText)
                 }
                 Text(message.text)
-                    .font(.body)
+                    .font(.empyBody)
                     .foregroundColor(.primary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(isYou ? Color.blue.opacity(0.03) : Color.clear)
+        .padding(.horizontal, EmpySpacing.md)
+        .padding(.vertical, EmpySpacing.xs)
+        .background(isYou ? Color.empySpeakerYou.opacity(0.03) : Color.clear)
     }
     
     private var speakerLabel: String {
