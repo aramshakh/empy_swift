@@ -33,6 +33,10 @@ class SessionManager: ObservableObject {
     private let logger: SessionLogger
 
     private var timerCancellable: AnyCancellable?
+    private var processTimer: AnyCancellable?
+    private var backendConversationId: String?
+    private let apiClient: BackendAPIClient = .shared
+    private var lastProcessedTranscriptLength: Int = 0
 
     // Singleton
     static let shared = SessionManager()
@@ -67,10 +71,9 @@ class SessionManager: ObservableObject {
             logger.startSession(id: UUID().uuidString)
         }
         logger.log(event: "session_start", layer: "session")
-        
-        // Initialize chat manager
-        let conversationId = UUID().uuidString
-        chatManager.initialize(conversationId: conversationId)
+
+        // Create backend conversation (fire-and-forget; falls back gracefully if backend is down)
+        Task { await createBackendConversation() }
 
         // Wire mic chunks → mic Deepgram client
         dualStreamManager.onMicChunk = { [weak self] chunk in
@@ -118,7 +121,9 @@ class SessionManager: ObservableObject {
         // 3. Update UI state
         state = .recording
         sessionStartTime = Date()
+        lastProcessedTranscriptLength = 0
         startTimer()
+        startProcessTimer()
 
         // 4. Start system audio + connect system Deepgram in background.
         // Use the return value directly — avoids a race reading the @Published property
@@ -141,13 +146,18 @@ class SessionManager: ObservableObject {
     func stopRecording() {
         logger.log(event: "session_stop", layer: "session")
 
+        let convId = backendConversationId
         Task {
             await dualStreamManager.stop()
             await transcriptEngine.endSession()
+            if let id = convId { await endBackendConversation(id: id) }
         }
 
+        processTimer?.cancel()
+        processTimer = nil
         timerCancellable?.cancel()
         state = .stopped
+        backendConversationId = nil
         logger.endSession()
     }
 
@@ -239,5 +249,96 @@ class SessionManager: ObservableObject {
 
     @objc private func handleTranscriptionDegraded() {
         logger.log(event: "session_transcription_degraded", layer: "session")
+    }
+
+    // MARK: - Backend conversation lifecycle
+
+    private func createBackendConversation() async {
+        let req = ConversationInitRequest(userId: AppConfig.backendUserId)
+        do {
+            let resp = try await apiClient.createConversation(request: req)
+            backendConversationId = resp.conversationId
+            await MainActor.run {
+                chatManager.initialize(conversationId: resp.conversationId)
+            }
+            logger.log(event: "backend_conversation_created", layer: "session",
+                       details: ["conversation_id": resp.conversationId])
+        } catch {
+            // Backend down or auth missing — recording still works, /process will be skipped
+            logger.log(event: "backend_conversation_create_failed", layer: "session",
+                       details: ["error": error.localizedDescription])
+            await MainActor.run {
+                chatManager.initialize(conversationId: UUID().uuidString)
+            }
+        }
+    }
+
+    private func endBackendConversation(id: String) async {
+        do {
+            _ = try await apiClient.endConversation(id: id)
+            logger.log(event: "backend_conversation_ended", layer: "session",
+                       details: ["conversation_id": id])
+        } catch {
+            logger.log(event: "backend_conversation_end_failed", layer: "session",
+                       details: ["error": error.localizedDescription])
+        }
+    }
+
+    // MARK: - /process timer (every 5s)
+
+    private func startProcessTimer() {
+        processTimer = Timer.publish(every: 5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.sendTranscriptChunk()
+            }
+    }
+
+    private func sendTranscriptChunk() {
+        guard let convId = backendConversationId else { return }
+
+        let allSegments = transcriptEngine.transcriptState.segments.filter { $0.isFinal }
+        let newSegments = allSegments.dropFirst(lastProcessedTranscriptLength)
+        guard !newSegments.isEmpty else { return }
+
+        lastProcessedTranscriptLength = allSegments.count
+
+        // Map TranscriptSegment → Transcription
+        // Segment index used as stable integer id (backend deduplicates by id)
+        let baseIndex = allSegments.count - newSegments.count
+
+        let transcriptions: [Transcription] = newSegments.enumerated().map { offset, seg in
+            let speaker = (seg.speaker == "you") ? "me" : "other"
+            let timeStart = Int(seg.startTime * 1000)  // seconds → ms
+            let timeEnd   = Int(seg.endTime   * 1000)
+            return Transcription(
+                id: baseIndex + offset,
+                text: seg.text,
+                timeStart: timeStart,
+                timeEnd: timeEnd,
+                speaker: speaker
+            )
+        }
+
+        let request = ProcessRequest(id: convId, conversation: transcriptions)
+
+        Task {
+            do {
+                let response = try await apiClient.process(request: request)
+                logger.log(event: "process_response", layer: "session",
+                           details: ["nudge_count": "\(response.nudges.count)"])
+                // Surface nudges in UI via chatManager if any returned
+                if !response.nudges.isEmpty {
+                    await MainActor.run {
+                        for nudge in response.nudges {
+                            chatManager.receiveNudge(nudge)
+                        }
+                    }
+                }
+            } catch {
+                logger.log(event: "process_failed", layer: "session",
+                           details: ["error": error.localizedDescription])
+            }
+        }
     }
 }

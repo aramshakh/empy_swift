@@ -1,0 +1,15 @@
+{
+  "originHash" : "61c5db17af7213eaabe61e437ea328e1fcbed86488c5666f2045a713cf939c3f",
+  "pins" : [
+    {
+      "identity" : "dtln-aec-coreml",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/MimicScribe/dtln-aec-coreml.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "8130298d369c1a3ceabcf10cd8aee627a225682b"
+      }
+    }
+  ],
+  "version" : 3
+}

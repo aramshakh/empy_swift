@@ -61,6 +61,11 @@
             value = "f4fe1258da8c5ed60c31fe20d6be30169aa29fd1"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "EMPY&#x200b;_&#x200b;BACKEND&#x200b;_&#x200b;TOKEN"
+            value = "test&#x200b;-token"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction

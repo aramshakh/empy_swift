@@ -124,15 +124,6 @@ struct RecordingView: View {
             // Talk ratio indicator
             TalkRatioView(userPercentage: calculateTalkRatio())
             
-            Divider()
-            
-            Text("Session Stats")
-                .font(.empyLabel)
-                .foregroundColor(.empySecondaryText)
-            
-            Text("Stats placeholder")
-                .font(.empyCaption)
-            
             Spacer()
 
             Divider()

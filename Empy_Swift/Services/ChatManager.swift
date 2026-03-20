@@ -14,71 +14,56 @@ class ChatManager: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
-    
+
     private let apiClient: BackendAPIClient
-    private var conversationId: String?
-    
+    private(set) var conversationId: String?
+
     init(apiClient: BackendAPIClient = .shared) {
         self.apiClient = apiClient
     }
-    
+
     // MARK: - Initialize
-    
-    /// Initialize chat with conversation ID and greeting
+
+    /// Initialize chat with a backend conversation ID and show greeting
     func initialize(conversationId: String) {
         self.conversationId = conversationId
-        
-        // Initial greeting
         addAgentMessage("Hi! Call started. What do you want to focus on?")
     }
-    
+
     // MARK: - Send Message
-    
-    /// Send user message and get agent response
+
+    /// Send user message and get agent response via /advice
     func sendMessage() {
         guard !inputText.isEmpty else { return }
         guard let convId = conversationId else {
-            print("ChatManager: No conversation ID set")
+            print("ChatManager: No conversation ID — conversation not started yet")
             return
         }
-        
+
         let userText = inputText
         addUserMessage(userText)
         inputText = ""
-        
-        // Create nudge for user query
-        let nudge = Nudge(
-            conversationId: convId,
-            text: userText,
-            type: "user_query"
-        )
-        
-        Task {
-            await getAdvice(nudge: nudge)
-        }
+
+        let nudge = Nudge(conversationId: convId, text: userText, type: "user_query")
+        Task { await getAdvice(nudge: nudge) }
     }
-    
+
     // MARK: - Handle Detected Question
-    
+
     /// Handle auto-detected question from transcript
     func handleDetectedQuestion(_ questionText: String) {
-        guard let convId = conversationId else {
-            print("ChatManager: No conversation ID for detected question")
-            return
-        }
-        
-        // Create nudge for question help
-        let nudge = Nudge(
-            conversationId: convId,
-            text: questionText,
-            type: "question_help"
-        )
-        
-        Task {
-            await getAdvice(nudge: nudge)
-        }
+        guard let convId = conversationId else { return }
+        let nudge = Nudge(conversationId: convId, text: questionText, type: "question_help")
+        Task { await getAdvice(nudge: nudge) }
     }
     
+    // MARK: - Receive nudge from /process
+
+    /// Display a nudge surfaced by the backend as an agent message
+    func receiveNudge(_ nudge: Nudge) {
+        addAgentMessage(nudge.text)
+    }
+
     // MARK: - Get Advice (Private)
     
     private func getAdvice(nudge: Nudge) async {
