@@ -264,11 +264,11 @@ class SessionManager: ObservableObject {
             logger.log(event: "backend_conversation_created", layer: "session",
                        details: ["conversation_id": resp.conversationId])
         } catch {
-            // Backend down or auth missing — recording still works, /process will be skipped
+            // Auth failed or backend down — recording still works, /process will be skipped
             logger.log(event: "backend_conversation_create_failed", layer: "session",
                        details: ["error": error.localizedDescription])
             await MainActor.run {
-                chatManager.initialize(conversationId: UUID().uuidString)
+                chatManager.initialize(conversationId: "offline")
             }
         }
     }

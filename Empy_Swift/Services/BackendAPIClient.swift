@@ -18,7 +18,7 @@ class BackendAPIClient {
     init(baseURL: String? = nil) {
         self.baseURL = baseURL
             ?? ProcessInfo.processInfo.environment["EMPY_BACKEND_URL"]
-            ?? "http://localhost:8081"
+            ?? AppConfig.backendEnvironment.baseURL
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
@@ -40,8 +40,21 @@ class BackendAPIClient {
     }
 
     private func perform<T: Decodable>(_ request: URLRequest) async throws -> T {
+        // Log outgoing request
+        let method = request.httpMethod ?? "?"
+        let url = request.url?.absoluteString ?? "?"
+        if let body = request.httpBody, let bodyStr = String(data: body, encoding: .utf8) {
+            print("📡 API \(method) \(url)\n   Body: \(bodyStr.prefix(500))")
+        } else {
+            print("📡 API \(method) \(url)")
+        }
+
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+
+        let responseStr = String(data: data, encoding: .utf8) ?? "<binary>"
+        print("📡 API \(method) \(url) → \(http.statusCode)\n   Response: \(responseStr.prefix(500))")
+
         guard (200...299).contains(http.statusCode) else {
             if http.statusCode == 401 { throw APIError.unauthorized }
             if http.statusCode == 402 { throw APIError.subscriptionInactive }
@@ -146,12 +159,24 @@ struct ConversationInitResponse: Codable {
     }
 }
 
+struct SummaryResponse: Codable {
+    let takeaways: [String]
+    let actionPoints: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case takeaways
+        case actionPoints = "action_points"
+    }
+}
+
 struct ConversationEndResponse: Codable {
     let conversationId: String
+    let summary: SummaryResponse
     let reportId: String?
 
     enum CodingKeys: String, CodingKey {
         case conversationId = "conversation_id"
+        case summary
         case reportId = "report_id"
     }
 }

@@ -8,8 +8,30 @@
 
 import Foundation
 
+/// Backend environment selector
+enum APIEnvironment: String {
+    case local      // http://localhost:8081  (Docker dev)
+    case hetzner    // http://77.42.40.45:8080 (staging server)
+
+    var baseURL: String {
+        switch self {
+        case .local:    return "http://localhost:8081"
+        case .hetzner:  return "http://77.42.40.45:8080"
+        }
+    }
+}
+
 /// Central configuration for the Empy application
 enum AppConfig {
+    /// Active backend environment.
+    /// Override with `EMPY_BACKEND_ENV=local` or `EMPY_BACKEND_ENV=hetzner` in scheme env vars.
+    static var backendEnvironment: APIEnvironment {
+        if let raw = ProcessInfo.processInfo.environment["EMPY_BACKEND_ENV"],
+           let env = APIEnvironment(rawValue: raw) {
+            return env
+        }
+        return .hetzner  // default to staging server
+    }
     /// Deepgram API key from environment or fallback demo key
     ///
     /// Reads from `EMPY_DEEPGRAM_KEY` environment variable.
@@ -20,7 +42,8 @@ enum AppConfig {
         if let envKey = ProcessInfo.processInfo.environment["EMPY_DEEPGRAM_KEY"], !envKey.isEmpty {
             return envKey
         }
-        return "DEMO_KEY_REPLACE_ME"
+        // Hardcoded fallback — Xcode scheme env vars unreliable across rebuilds
+        return "f4fe1258da8c5ed60c31fe20d6be30169aa29fd1"
     }
     
     /// User ID sent to backend on conversation create.
@@ -43,7 +66,9 @@ enum AppConfig {
     /// Returns `nil` if not set — unauthenticated endpoints work without it.
     static var backendToken: String? {
         let token = ProcessInfo.processInfo.environment["EMPY_BACKEND_TOKEN"] ?? ""
-        return token.isEmpty ? nil : token
+        if !token.isEmpty { return token }
+        // Hardcoded fallback for staging
+        return "ios-client-token"
     }
 
     /// Check if a valid Deepgram API key is configured
@@ -58,7 +83,9 @@ enum AppConfig {
     ///
     /// Logs whether Deepgram key is present without exposing the actual value
     static func logStartupConfig() {
-        let keyPresent = hasValidDeepgramKey
-        print("🔑 Deepgram key present: \(keyPresent)")
+        print("🔑 Deepgram key present: \(hasValidDeepgramKey)")
+        print("🌐 Backend env: \(backendEnvironment.rawValue) → \(backendEnvironment.baseURL)")
+        print("🔐 Backend token present: \(backendToken != nil)")
+        print("👤 User ID: \(backendUserId)")
     }
 }
